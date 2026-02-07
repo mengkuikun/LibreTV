@@ -32,6 +32,14 @@ LibreTV 是一个轻量级、免费的在线视频搜索与观看平台，提供
 - 如因公开分享导致的任何法律问题，用户需自行承担责任
 - 项目开发者不对用户的使用行为承担任何法律责任
 
+## ❓ 常见问题
+
+**Q: 我的 oauthClientId 是多少？**
+
+A: LibreTV **不使用 OAuth 认证**。本项目使用简单的密码保护机制（PASSWORD 环境变量），无需配置 OAuth 客户端 ID。详情请查看 [FAQ.md](FAQ.md#q-我的-oauthclientid-是多少)。
+
+**更多问题？** 请查看完整的 [常见问题解答 (FAQ)](FAQ.md)。
+
 ## ⚠️ 同步与升级
 
 Pull Bot 会反复触发无效的 PR 和垃圾邮件，严重干扰项目维护。作者可能会直接拉黑所有 Pull Bot 自动发起的同步请求的仓库所有者。
@@ -120,9 +128,44 @@ npm run dev
 
 ## 🔧 自定义配置
 
-### 密码保护
+### 密码保护与认证
 
 **重要提示**: 为确保安全，所有部署都必须设置 PASSWORD 环境变量，否则用户将看到设置密码的提示。
+
+#### 认证方式说明
+
+LibreTV 使用 **简单密码保护机制**，而非 OAuth 认证：
+
+- ✅ **使用密码（PASSWORD）环境变量** - 简单、快速、适合个人使用
+- ❌ **不使用 OAuth** - 无需配置 clientId、clientSecret 等复杂参数
+
+#### 如何设置密码
+
+1. **Vercel/Netlify 等云平台：**
+   ```
+   在环境变量中设置：
+   PASSWORD=your_secure_password
+   ```
+
+2. **Docker 部署：**
+   ```bash
+   docker run -d -e PASSWORD=your_secure_password -p 8899:8080 bestzwei/libretv:latest
+   ```
+
+3. **本地开发：**
+   ```bash
+   # 编辑 .env 文件
+   PASSWORD=your_secure_password
+   ```
+
+#### 安全机制
+
+- 密码使用 SHA-256 哈希算法保护
+- 验证状态存储在浏览器本地（90天有效期）
+- 代理请求使用基于密码哈希的鉴权机制
+- 不涉及第三方认证服务
+
+**详细说明请参阅：** [FAQ - 认证与安全](FAQ.md#认证与安全)
 
 
 ### API兼容性
