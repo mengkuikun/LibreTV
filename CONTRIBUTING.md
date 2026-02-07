@@ -230,6 +230,10 @@ function search(k) {
 - **示例项目**: 集成示例和最佳实践
 - **社区建设**: 问题回答和新手指导
 
+### 开发工具
+我们鼓励使用现代开发工具来提高效率：
+- **GitHub Copilot**: AI 编程助手，可以帮助你更快地编写代码、生成文档和管理 Issue/PR。查看我们的 [GitHub Copilot 使用指南](docs/GITHUB_COPILOT_GUIDE.md) 了解如何在 LibreTV 项目中充分利用 Copilot。
+
 ## 🔍 代码审查流程
 
 1. **自动检查**: PR 会触发自动化测试

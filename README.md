@@ -156,6 +156,18 @@ LibreTV 支持标准的苹果 CMS V10 API 格式。添加自定义 API 时需遵
 - 服务端 HLS 代理和处理技术
 - localStorage 本地存储
 
+## 📚 开发者资源
+
+### GitHub Copilot 使用指南
+
+对于参与 LibreTV 开发的贡献者，我们提供了详细的 GitHub Copilot 使用指南，帮助您：
+- 🚀 提高开发效率
+- 💡 学习最佳实践
+- 🤝 改善代码协作
+- 📝 自动生成文档
+
+**查看指南**: [GitHub Copilot 功能详解与 LibreTV 项目实践指南](docs/GITHUB_COPILOT_GUIDE.md)
+
 ## ⚠️ 免责声明
 
 LibreTV 仅作为视频搜索工具，不存储、上传或分发任何视频内容。所有视频均来自第三方 API 接口提供的搜索结果。如有侵权内容，请联系相应的内容提供方。
