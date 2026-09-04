@@ -1,3 +1,49 @@
+// XML CMS (Type 0) 格式转换辅助函数
+function parseXmlCmsResponse(xmlText) {
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, 'text/xml');
+        const videoNodes = doc.querySelectorAll('video');
+        const list = [];
+        videoNodes.forEach(node => {
+            const getText = (tag) => {
+                const el = node.querySelector(tag);
+                return el ? el.textContent.trim() : '';
+            };
+            const ddNodes = node.querySelectorAll('dl dd');
+            const playSources = [];
+            const playFroms = [];
+            ddNodes.forEach((dd, idx) => {
+                const flag = dd.getAttribute('flag') || `线路${idx + 1}`;
+                playFroms.push(flag);
+                playSources.push(dd.textContent.trim());
+            });
+            list.push({
+                vod_id: getText('id'),
+                vod_name: getText('name'),
+                vod_pic: getText('pic'),
+                type_name: getText('type'),
+                vod_year: getText('year'),
+                vod_area: getText('area'),
+                vod_director: getText('director'),
+                vod_actor: getText('actor'),
+                vod_remarks: getText('note') || getText('state'),
+                vod_content: getText('des'),
+                vod_play_from: playFroms.join('$$$'),
+                vod_play_url: playSources.join('$$$')
+            });
+        });
+        return {
+            code: 200,
+            list: list
+        };
+    } catch (e) {
+        console.error('XML 解析失败:', e);
+        return { code: 500, list: [] };
+    }
+}
+window.parseXmlCmsResponse = parseXmlCmsResponse;
+
 // 改进的API请求处理函数
 async function handleApiRequest(url) {
     const customApi = url.searchParams.get('customApi') || '';
@@ -34,27 +80,23 @@ async function handleApiRequest(url) {
                     await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(apiUrl)) :
                     PROXY_URL + encodeURIComponent(apiUrl);
                     
-                const response = await fetch(proxiedUrl, {
-                    headers: API_CONFIG.search.headers,
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                if (!response.ok) {
-                    throw new Error(`API请求失败: ${response.status}`);
+                const contentType = response.headers.get('content-type') || '';
+                const rawText = await response.text();
+                let data;
+                if (contentType.includes('xml') || rawText.trim().startsWith('<?xml') || rawText.trim().startsWith('<rss')) {
+                    data = parseXmlCmsResponse(rawText);
+                } else {
+                    data = JSON.parse(rawText);
                 }
                 
-                const data = await response.json();
-                
-                // 检查JSON格式的有效性
+                // 检查数据格式的有效性
                 if (!data || !Array.isArray(data.list)) {
                     throw new Error('API返回的数据格式无效');
                 }
                 
                 // 添加源信息到每个结果
                 data.list.forEach(item => {
-                    item.source_name = source === 'custom' ? '自定义源' : API_SITES[source].name;
+                    item.source_name = source === 'custom' ? (url.searchParams.get('customName') || '自定义源') : API_SITES[source].name;
                     item.source_code = source;
                     // 对于自定义源，添加API URL信息
                     if (source === 'custom') {
@@ -76,14 +118,10 @@ async function handleApiRequest(url) {
         if (url.pathname === '/api/detail') {
             const id = url.searchParams.get('id');
             const sourceCode = url.searchParams.get('source') || 'heimuer'; // 获取源代码
+            const customName = url.searchParams.get('customName') || '';
             
-            if (!id) {
+            if (!id || typeof id !== 'string' || id.trim().length === 0) {
                 throw new Error('缺少视频ID参数');
-            }
-            
-            // 验证ID格式 - 只允许数字和有限的特殊字符
-            if (!/^[\w-]+$/.test(id)) {
-                throw new Error('无效的视频ID格式');
             }
 
             // 验证API和source的有效性
@@ -108,93 +146,133 @@ async function handleApiRequest(url) {
             if (sourceCode === 'custom' && url.searchParams.get('useDetail') === 'true') {
                 return await handleCustomApiSpecialDetail(id, customApi);
             }
-            
-            const detailUrl = customApi
-                ? `${customApi}${API_CONFIG.detail.path}${id}`
-                : `${API_SITES[sourceCode].api}${API_CONFIG.detail.path}${id}`;
-            
-            // 添加超时处理
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
-            
-            try {
-                // 添加鉴权参数到代理URL
-                const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                    await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(detailUrl)) :
-                    PROXY_URL + encodeURIComponent(detailUrl);
-                    
-                const response = await fetch(proxiedUrl, {
-                    headers: API_CONFIG.detail.headers,
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                if (!response.ok) {
-                    throw new Error(`详情请求失败: ${response.status}`);
-                }
-                
-                // 解析JSON
-                const data = await response.json();
-                
-                // 检查返回的数据是否有效
-                if (!data || !data.list || !Array.isArray(data.list) || data.list.length === 0) {
-                    throw new Error('获取到的详情内容无效');
-                }
-                
-                // 获取第一个匹配的视频详情
-                const videoDetail = data.list[0];
-                
-                // 提取播放地址
-                let episodes = [];
-                
-                if (videoDetail.vod_play_url) {
-                    // 分割不同播放源
-                    const playSources = videoDetail.vod_play_url.split('$$$');
-                    
-                    // 提取第一个播放源的集数（通常为主要源）
-                    if (playSources.length > 0) {
-                        const mainSource = playSources[0];
-                        const episodeList = mainSource.split('#');
-                        
-                        // 从每个集数中提取URL
-                        episodes = episodeList.map(ep => {
-                            const parts = ep.split('$');
-                            // 返回URL部分(通常是第二部分，如果有的话)
-                            return parts.length > 1 ? parts[1] : '';
-                        }).filter(url => url && (url.startsWith('http://') || url.startsWith('https://')));
+
+            const baseApi = sourceCode === 'custom' ? customApi : API_SITES[sourceCode].api;
+            let cleanBase = baseApi.trim();
+            const hasQuery = cleanBase.includes('?');
+            const sep = hasQuery ? '&' : (cleanBase.endsWith('/') ? '?' : '/?');
+
+            // 1. 优先使用标准 TVBox / 苹果 CMS 的 ac=detail&ids= 请求详情
+            const primaryDetailUrl = `${cleanBase}${sep}ac=detail&ids=${encodeURIComponent(id)}`;
+            let data = null;
+            let finalDetailUrl = primaryDetailUrl;
+
+            // 封装请求方法
+            const fetchCmsData = async (targetUrl) => {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                try {
+                    const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
+                        await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(targetUrl)) :
+                        PROXY_URL + encodeURIComponent(targetUrl);
+                    const resp = await fetch(proxiedUrl, {
+                        headers: API_CONFIG.detail.headers,
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    if (!resp.ok) return null;
+                    const ct = resp.headers.get('content-type') || '';
+                    const txt = await resp.text();
+                    if (ct.includes('xml') || txt.trim().startsWith('<?xml') || txt.trim().startsWith('<rss')) {
+                        return parseXmlCmsResponse(txt);
                     }
+                    return JSON.parse(txt);
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    return null;
                 }
-                
-                // 如果没有找到播放地址，尝试使用正则表达式查找m3u8链接
-                if (episodes.length === 0 && videoDetail.vod_content) {
-                    const matches = videoDetail.vod_content.match(M3U8_PATTERN) || [];
-                    episodes = matches.map(link => link.replace(/^\$/, ''));
+            };
+
+            data = await fetchCmsData(primaryDetailUrl);
+
+            // 2. 如果 ac=detail 返回无视频或没有播放地址，自动降级尝试 ac=videolist&ids=
+            if (!data || !data.list || !Array.isArray(data.list) || data.list.length === 0 || !data.list[0].vod_play_url) {
+                const fallbackDetailUrl = `${cleanBase}${sep}ac=videolist&ids=${encodeURIComponent(id)}`;
+                const fallbackData = await fetchCmsData(fallbackDetailUrl);
+                if (fallbackData && Array.isArray(fallbackData.list) && fallbackData.list.length > 0) {
+                    data = fallbackData;
+                    finalDetailUrl = fallbackDetailUrl;
                 }
-                
-                return JSON.stringify({
-                    code: 200,
-                    episodes: episodes,
-                    detailUrl: detailUrl,
-                    videoInfo: {
-                        title: videoDetail.vod_name,
-                        cover: videoDetail.vod_pic,
-                        desc: videoDetail.vod_content,
-                        type: videoDetail.type_name,
-                        year: videoDetail.vod_year,
-                        area: videoDetail.vod_area,
-                        director: videoDetail.vod_director,
-                        actor: videoDetail.vod_actor,
-                        remarks: videoDetail.vod_remarks,
-                        // 添加源信息
-                        source_name: sourceCode === 'custom' ? '自定义源' : API_SITES[sourceCode].name,
-                        source_code: sourceCode
-                    }
-                });
-            } catch (fetchError) {
-                clearTimeout(timeoutId);
-                throw fetchError;
             }
+            
+            // 检查返回的数据是否有效
+            if (!data || !data.list || !Array.isArray(data.list) || data.list.length === 0) {
+                throw new Error('获取到的详情内容无效或源站无响应');
+            }
+            
+            // 获取第一个匹配的视频详情
+            const videoDetail = data.list[0];
+            
+            // 提取播放地址与多线路结构
+            let episodes = [];
+            let routes = [];
+            
+            if (videoDetail.vod_play_url) {
+                // 分割不同播放源/线路
+                const playSources = videoDetail.vod_play_url.split('$$$');
+                const playFroms = (videoDetail.vod_play_from || '').split('$$$');
+                
+                routes = playSources.map((sourceStr, sIndex) => {
+                    const routeName = (playFroms[sIndex] || `播放线路 ${sIndex + 1}`).trim();
+                    const episodeList = sourceStr.split('#');
+                    
+                    const epList = episodeList.map((ep, eIndex) => {
+                        const parts = ep.split('$');
+                        const epName = parts.length > 1 ? parts[0].trim() : `第${eIndex + 1}集`;
+                        const epUrl = parts.length > 1 ? parts[1].trim() : parts[0].trim();
+                        return {
+                            name: epName,
+                            url: epUrl
+                        };
+                    }).filter(item => item.url && (item.url.startsWith('http://') || item.url.startsWith('https://')));
+                    
+                    return {
+                        name: routeName,
+                        episodes: epList
+                    };
+                }).filter(r => r.episodes.length > 0);
+                
+                // 默认线路的所有剧集 URL 列表（向后兼容）
+                if (routes.length > 0) {
+                    episodes = routes[0].episodes.map(e => e.url);
+                }
+            }
+            
+            // 如果没有找到播放地址，尝试使用正则表达式查找 m3u8 链接
+            if (episodes.length === 0 && videoDetail.vod_content) {
+                const matches = videoDetail.vod_content.match(M3U8_PATTERN) || [];
+                episodes = matches.map(link => link.replace(/^\$/, ''));
+                if (episodes.length > 0) {
+                    routes = [{
+                        name: '默认线路',
+                        episodes: episodes.map((u, i) => ({ name: `第${i + 1}集`, url: u }))
+                    }];
+                }
+            }
+
+            const sourceDisplayName = sourceCode === 'custom'
+                ? (customName || (window.getCustomApiInfo ? window.getCustomApiInfo(sourceCode.replace('custom_', ''))?.name : '自定义源'))
+                : (API_SITES[sourceCode] ? API_SITES[sourceCode].name : sourceCode);
+            
+            return JSON.stringify({
+                code: 200,
+                episodes: episodes,
+                routes: routes,
+                detailUrl: finalDetailUrl,
+                videoInfo: {
+                    title: videoDetail.vod_name,
+                    cover: videoDetail.vod_pic,
+                    desc: videoDetail.vod_content,
+                    type: videoDetail.type_name,
+                    year: videoDetail.vod_year,
+                    area: videoDetail.vod_area,
+                    director: videoDetail.vod_director,
+                    actor: videoDetail.vod_actor,
+                    remarks: videoDetail.vod_remarks,
+                    source_name: sourceDisplayName,
+                    source_code: sourceCode
+                }
+            });
         }
 
         throw new Error('未知的API路径');

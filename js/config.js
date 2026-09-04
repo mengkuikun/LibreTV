@@ -62,11 +62,12 @@ const API_CONFIG = {
         }
     },
     detail: {
-        // 只拼接参数部分
-        path: '?ac=videolist&ids=',
+        // 优先使用 TVBox 与苹果 CMS 标准的 ac=detail，支持自动 fallback
+        path: '?ac=detail&ids=',
+        fallbackPath: '?ac=videolist&ids=',
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'application/json'
+            'Accept': 'application/json, text/xml, */*'
         }
     }
 };
@@ -107,10 +108,10 @@ const SECURITY_CONFIG = {
     // allowedApiDomains 不再需要，因为所有请求都通过内部代理
 };
 
-// 添加多个自定义API源的配置
+// 添加多个自定义API源的配置 (已扩容支持 TVBox 批量导入)
 const CUSTOM_API_CONFIG = {
     separator: ',',           // 分隔符
-    maxSources: 5,            // 最大允许的自定义源数量
+    maxSources: 500,          // 最大允许的自定义源数量 (支持 TVBox 批量导入)
     testTimeout: 5000,        // 测试超时时间(毫秒)
     namePrefix: 'Custom-',    // 自定义源名称前缀
     validateUrl: true,        // 验证URL格式

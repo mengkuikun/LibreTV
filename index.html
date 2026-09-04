@@ -121,6 +121,19 @@
                         <button onclick="cancelAddCustomApi()" class="bg-[#444] hover:bg-[#555] text-white px-3 py-1 rounded text-xs">取消</button>
                     </div>
                 </div>
+
+                <!-- TVBox 订阅与接口导入按钮 -->
+                <div class="mt-2 pt-2 border-t border-[#222] flex space-x-2">
+                    <button onclick="openTvboxModal()" class="flex-1 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded text-xs font-medium flex items-center justify-center space-x-1 transition-all shadow">
+                        <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                        </svg>
+                        <span>导入 TVBox 接口 / 订阅</span>
+                    </button>
+                    <button onclick="exportTvboxConfig()" class="px-2.5 py-1.5 bg-[#252525] hover:bg-[#333] text-gray-300 hover:text-white rounded text-xs transition-colors" title="导出当前接口为 TVBox 配置">
+                        <span>导出</span>
+                    </button>
+                </div>
             </div>
             
             <!-- 内容过滤设置区域 -->
@@ -331,6 +344,112 @@
         </div>
     </div>
 
+    <!-- TVBox 接口与订阅源导入弹窗 -->
+    <div id="tvboxModal" class="fixed inset-0 bg-black/95 hidden flex items-center justify-center transition-opacity duration-300 z-50">
+        <div class="bg-[#111] p-6 rounded-xl w-11/12 max-w-3xl border border-[#333] max-h-[92vh] flex flex-col shadow-2xl">
+            <!-- 头部 -->
+            <div class="flex justify-between items-center pb-3 mb-4 border-b border-[#252525] flex-none">
+                <div class="flex items-center space-x-2">
+                    <span class="text-xl">📺</span>
+                    <h2 class="text-xl font-bold gradient-text">TVBox 接口与订阅源管理</h2>
+                    <span class="text-xs px-2 py-0.5 bg-blue-900/60 text-blue-300 rounded border border-blue-700/50">Cloudflare Pages 兼容</span>
+                </div>
+                <button onclick="closeTvboxModal()" class="text-gray-400 hover:text-white text-2xl transition-colors">&times;</button>
+            </div>
+
+            <!-- Tab 切换 -->
+            <div class="flex space-x-2 mb-4 border-b border-[#222] pb-2 flex-none text-xs">
+                <button id="tabBtnUrl" onclick="switchTvboxTab('url')" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium transition-colors">
+                    🌐 远程订阅链接
+                </button>
+                <button id="tabBtnJson" onclick="switchTvboxTab('json')" class="px-3 py-1.5 rounded-lg bg-[#222] text-gray-400 hover:text-white transition-colors">
+                    📋 粘贴配置 (JSON/Base64)
+                </button>
+                <button id="tabBtnBuiltin" onclick="switchTvboxTab('builtin')" class="px-3 py-1.5 rounded-lg bg-[#222] text-gray-400 hover:text-white transition-colors">
+                    ⚡ 内置 17 个精选源
+                </button>
+            </div>
+
+            <!-- Tab 1: 远程 URL -->
+            <div id="tvboxTabUrl" class="space-y-3 flex-none mb-4">
+                <div class="flex space-x-2">
+                    <input type="text" id="tvboxUrlInput" placeholder="输入 TVBox 订阅链接，如 http://.../tvbox.json" 
+                           class="flex-1 bg-[#181818] border border-[#333] text-white px-3 py-2 rounded-lg text-xs focus:outline-none focus:border-blue-500">
+                    <button onclick="parseTvboxFromUrl()" id="btnFetchTvbox" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center space-x-1">
+                        <span>拉取并解析</span>
+                    </button>
+                </div>
+                <p class="text-[11px] text-gray-500">支持各类 TVBox 订阅配置链接，将自动通过 Cloudflare 边缘代理拉取，无需担心跨域问题。</p>
+            </div>
+
+            <!-- Tab 2: 粘贴 JSON / Base64 -->
+            <div id="tvboxTabJson" class="space-y-3 flex-none mb-4 hidden">
+                <textarea id="tvboxJsonInput" rows="4" placeholder="粘贴 TVBox 配置内容，支持标准 JSON 格式或 Base64 编码密文..." 
+                          class="w-full bg-[#181818] border border-[#333] text-white p-2.5 rounded-lg text-xs font-mono focus:outline-none focus:border-blue-500"></textarea>
+                <div class="flex justify-end">
+                    <button onclick="parseTvboxFromJsonText()" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors">
+                        解析内容
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tab 3: 内置精选源 -->
+            <div id="tvboxTabBuiltin" class="p-3 bg-[#181818] rounded-lg mb-4 flex-none hidden border border-[#252525]">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h4 class="text-xs font-semibold text-white mb-1">工作区精选源 (来自 _cms_endpoints.json)</h4>
+                        <p class="text-[11px] text-gray-400">涵盖短剧 (河马)、4K影视 (移动/A站/人人)、音乐 (酷我/网易云/咪咕/秋秋) 等 17 个高可用采集源。</p>
+                    </div>
+                    <button onclick="loadBuiltinTvboxSites()" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition-colors flex-shrink-0 ml-3">
+                        载入 17 个精选源
+                    </button>
+                </div>
+            </div>
+
+            <!-- 解析状态与提示 -->
+            <div id="tvboxStatusMsg" class="hidden text-xs py-2 px-3 rounded-lg mb-3"></div>
+
+            <!-- 预览结果与接口列表 -->
+            <div id="tvboxPreviewArea" class="hidden flex-1 min-h-0 flex flex-col bg-[#141414] border border-[#262626] rounded-lg p-3">
+                <div class="flex flex-wrap justify-between items-center mb-2.5 pb-2 border-b border-[#252525] gap-2 flex-none">
+                    <div class="text-xs text-gray-300">
+                        <span>识别出 <strong id="tvboxCompatibleCount" class="text-emerald-400">0</strong> 个兼容源</span>
+                        <span id="tvboxIncompatibleHint" class="text-gray-500 ml-2"></span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="testAllTvboxLatency()" id="btnTvboxSpeedTest" class="px-2.5 py-1 bg-[#252525] hover:bg-[#333] text-yellow-400 hover:text-yellow-300 rounded text-xs transition-colors flex items-center space-x-1">
+                            <span>⚡ 一键测速</span>
+                        </button>
+                        <button onclick="selectAllTvboxSites(true)" class="px-2 py-1 bg-[#252525] hover:bg-[#333] text-gray-300 rounded text-xs">全选</button>
+                        <button onclick="selectAllTvboxSites(false)" class="px-2 py-1 bg-[#252525] hover:bg-[#333] text-gray-300 rounded text-xs">全不选</button>
+                    </div>
+                </div>
+
+                <div id="tvboxSitesContainer" class="overflow-y-auto flex-1 space-y-1.5 pr-1 max-h-56">
+                    <!-- 动态插入站点列表 -->
+                </div>
+            </div>
+
+            <!-- 底部操作按钮 -->
+            <div class="flex justify-between items-center pt-4 mt-4 border-t border-[#252525] flex-none">
+                <div class="text-[11px] text-gray-500">
+                    提示: 导入后自动保存至自定义源 (localStorage)，即刻生效
+                </div>
+                <div class="flex space-x-2">
+                    <button onclick="applyTvboxImport(false)" id="btnImportAppend" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50">
+                        追加导入所选
+                    </button>
+                    <button onclick="applyTvboxImport(true)" id="btnImportOverwrite" class="px-3.5 py-2 bg-[#252525] hover:bg-red-900/60 hover:text-red-300 text-gray-300 text-xs rounded-lg transition-colors border border-[#333]">
+                        覆盖导入
+                    </button>
+                    <button onclick="closeTvboxModal()" class="px-3 py-2 bg-[#333] hover:bg-[#444] text-white text-xs rounded-lg transition-colors">
+                        关闭
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 密码验证弹窗 -->
     <div id="passwordModal" class="fixed inset-0 bg-black/95 hidden items-center justify-center z-[65] transition-opacity duration-300">
         <div class="bg-[#111] p-8 rounded-lg w-11/12 max-w-md border border-[#333] max-h-[90vh] flex flex-col">
@@ -418,6 +537,7 @@
     <script src="js/customer_site.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/api.js"></script>
+    <script src="js/tvbox.js"></script>
     <script src="js/douban.js"></script>
     <script src="js/password.js"></script>
     <script src="js/search.js"></script>

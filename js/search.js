@@ -9,15 +9,18 @@ async function searchByAPIAndKeyWord(apiId, query) {
             if (!customApi) return [];
             
             apiBaseUrl = customApi.url;
-            apiUrl = apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
             apiName = customApi.name;
         } else {
             // 内置API
             if (!API_SITES[apiId]) return [];
             apiBaseUrl = API_SITES[apiId].api;
-            apiUrl = apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
             apiName = API_SITES[apiId].name;
         }
+
+        const cleanBase = apiBaseUrl.trim();
+        const hasQ = cleanBase.includes('?');
+        const sep = hasQ ? '&' : (cleanBase.endsWith('/') ? '?' : '/?');
+        apiUrl = `${cleanBase}${sep}ac=videolist&wd=${encodeURIComponent(query)}`;
         
         // 添加超时处理
         const controller = new AbortController();
@@ -39,7 +42,18 @@ async function searchByAPIAndKeyWord(apiId, query) {
             return [];
         }
         
-        const data = await response.json();
+        const ct = response.headers.get('content-type') || '';
+        const rawText = await response.text();
+        let data = null;
+        if (ct.includes('xml') || rawText.trim().startsWith('<?xml') || rawText.trim().startsWith('<rss')) {
+            data = window.parseXmlCmsResponse ? window.parseXmlCmsResponse(rawText) : null;
+        } else {
+            try {
+                data = JSON.parse(rawText);
+            } catch (err) {
+                return [];
+            }
+        }
         
         if (!data || !data.list || !Array.isArray(data.list) || data.list.length === 0) {
             return [];
@@ -64,9 +78,7 @@ async function searchByAPIAndKeyWord(apiId, query) {
             
             for (let page = 2; page <= pagesToFetch + 1; page++) {
                 // 构建分页URL
-                const pageUrl = apiBaseUrl + API_CONFIG.search.pagePath
-                    .replace('{query}', encodeURIComponent(query))
-                    .replace('{page}', page);
+                const pageUrl = `${cleanBase}${sep}ac=videolist&wd=${encodeURIComponent(query)}&pg=${page}`;
                 
                 // 创建获取额外页的Promise
                 const pagePromise = (async () => {
@@ -88,7 +100,18 @@ async function searchByAPIAndKeyWord(apiId, query) {
                         
                         if (!pageResponse.ok) return [];
                         
-                        const pageData = await pageResponse.json();
+                        const pageCt = pageResponse.headers.get('content-type') || '';
+                        const pageRawText = await pageResponse.text();
+                        let pageData = null;
+                        if (pageCt.includes('xml') || pageRawText.trim().startsWith('<?xml') || pageRawText.trim().startsWith('<rss')) {
+                            pageData = window.parseXmlCmsResponse ? window.parseXmlCmsResponse(pageRawText) : null;
+                        } else {
+                            try {
+                                pageData = JSON.parse(pageRawText);
+                            } catch (e) {
+                                return [];
+                            }
+                        }
                         
                         if (!pageData || !pageData.list || !Array.isArray(pageData.list)) return [];
                         

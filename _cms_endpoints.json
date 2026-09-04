@@ -1,0 +1,104 @@
+[
+  {
+    "key": "hema",
+    "name": "河马｜短剧(JX)",
+    "api": "http://nm.4688888.xyz/vod/hema/hm.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "kuwo",
+    "name": "酷我｜音乐(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kuwo.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "kuwot",
+    "name": "酷我｜听书(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kuwot.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "kuwot",
+    "name": "酷我｜听书(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kuwotdm.php/provide/vod/",
+    "type": 4
+  },
+  {
+    "key": "kuwo",
+    "name": "酷我｜音乐(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kwdm.php/provide/vod/",
+    "type": 4
+  },
+  {
+    "key": "qqmusic",
+    "name": "秋秋｜音乐(JX)",
+    "api": "http://nm.4688888.xyz/vod/qqmusic.php/provide/vod/",
+    "type": 4
+  },
+  {
+    "key": "qqmusic",
+    "name": "秋秋｜音乐(JX)",
+    "api": "http://nm.4688888.xyz/vod/qqmusicdm.php/provide/vod/",
+    "type": 4
+  },
+  {
+    "key": "xmly",
+    "name": "喜马拉雅｜听书(JX)",
+    "api": "http://nm.4688888.xyz/vod/xmly_a.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "yd",
+    "name": "移动｜4K(JX)",
+    "api": "https://nm.4688888.xyz/vod/138.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "acfun",
+    "name": "A站｜4K(JX)",
+    "api": "https://nm.4688888.xyz/vod/acfun.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "yd1",
+    "name": "移动①｜4K(JX)",
+    "api": "https://nm.4688888.xyz/vod/bix.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "gz",
+    "name": "洽洽｜替换(JX)",
+    "api": "https://nm.4688888.xyz/vod/gzys.php/provide/vod",
+    "type": 1
+  },
+  {
+    "key": "京城",
+    "name": "京城｜1K",
+    "api": "https://nm.4688888.xyz/vod/jc.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "薯片",
+    "name": "乐视｜1K(JX)",
+    "api": "https://nm.4688888.xyz/vod/ls.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "咪咕",
+    "name": "咪咕｜音乐(JX)",
+    "api": "https://nm.4688888.xyz/vod/migu.php/provide/vod",
+    "type": 1
+  },
+  {
+    "key": "rr",
+    "name": "人人｜4K(JX)",
+    "api": "https://nm.4688888.xyz/vod/rr.php/provide/vod/",
+    "type": 1
+  },
+  {
+    "key": "wyy",
+    "name": "网易云｜音乐(JX)",
+    "api": "https://nm.4688888.xyz/vod/wyy.php/provide/vod",
+    "type": 1
+  }
+]

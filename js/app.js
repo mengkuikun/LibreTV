@@ -11,7 +11,12 @@ let currentVideoTitle = '';
 // 全局变量用于倒序状态
 let episodesReversed = false;
 
-// 页面初始化
+// 多线路与 TVBox 导入全局变量
+let currentRoutes = [];
+let currentActiveRouteIndex = 0;
+let currentEpisodeNames = [];
+let currentParsedTvboxSites = [];
+
 document.addEventListener('DOMContentLoaded', function () {
     // 初始化API复选框
     initAPICheckboxes();
@@ -882,11 +887,12 @@ async function showDetails(id, vod_name, sourceCode) {
                 hideLoading();
                 return;
             }
-            // 传递 detail 字段
+            // 传递 detail 与 customName
+            const customNameParam = '&customName=' + encodeURIComponent(customApi.name);
             if (customApi.detail) {
-                apiParams = '&customApi=' + encodeURIComponent(customApi.url) + '&customDetail=' + encodeURIComponent(customApi.detail) + '&source=custom';
+                apiParams = '&customApi=' + encodeURIComponent(customApi.url) + '&customDetail=' + encodeURIComponent(customApi.detail) + customNameParam + '&source=custom';
             } else {
-                apiParams = '&customApi=' + encodeURIComponent(customApi.url) + '&source=custom';
+                apiParams = '&customApi=' + encodeURIComponent(customApi.url) + customNameParam + '&source=custom';
             }
         } else {
             // 内置API
@@ -911,6 +917,42 @@ async function showDetails(id, vod_name, sourceCode) {
         // 不对标题进行截断处理，允许完整显示
         modalTitle.innerHTML = `<span class="break-words">${vod_name || '未知视频'}</span>${sourceName}`;
         currentVideoTitle = vod_name || '未知视频';
+
+        // 处理多线路与剧集命名
+        currentRoutes = data.routes || [];
+        currentActiveRouteIndex = 0;
+        if (currentRoutes.length > 0 && currentRoutes[0].episodes) {
+            currentEpisodes = currentRoutes[0].episodes.map(e => e.url);
+            currentEpisodeNames = currentRoutes[0].episodes.map(e => e.name);
+        } else {
+            currentEpisodes = data.episodes;
+            currentEpisodeNames = [];
+        }
+        currentEpisodeIndex = 0;
+
+        // 构建多线路切换栏
+        let routeSwitcherHtml = '';
+        if (currentRoutes.length > 1) {
+            routeSwitcherHtml = `
+                <div class="mb-3 p-2 bg-[#181818] rounded-lg border border-[#252525]">
+                    <div class="text-xs text-gray-400 mb-1.5 flex items-center">
+                        <svg class="w-3.5 h-3.5 mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                        </svg>
+                        <span>播放线路切换:</span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5">
+                        ${currentRoutes.map((r, rIdx) => `
+                            <button onclick="switchPlayRoute(${rIdx}, '${(vod_name || '').replace(/'/g, "\\'")}', '${sourceCode}', '${id}')" 
+                                    id="route-btn-${rIdx}"
+                                    class="route-tab-btn px-2.5 py-1 rounded text-xs transition-all ${rIdx === 0 ? 'bg-blue-600 text-white font-medium shadow' : 'bg-[#222] hover:bg-[#333] text-gray-300'}">
+                                ${r.name || `线路 ${rIdx + 1}`} <span class="text-[10px] opacity-75">(${r.episodes.length}集)</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
 
         if (data.episodes && data.episodes.length > 0) {
             // 构建详情信息HTML
@@ -944,11 +986,9 @@ async function showDetails(id, vod_name, sourceCode) {
                 }
             }
 
-            currentEpisodes = data.episodes;
-            currentEpisodeIndex = 0;
-
             modalContent.innerHTML = `
                 ${detailInfoHtml}
+                ${routeSwitcherHtml}
                 <div class="flex flex-wrap items-center justify-between mb-4 gap-2">
                     <div class="flex items-center gap-2">
                         <button onclick="toggleEpisodeOrder('${sourceCode}', '${id}')" 
@@ -984,6 +1024,58 @@ async function showDetails(id, vod_name, sourceCode) {
     } finally {
         hideLoading();
     }
+}
+
+// 线路切换函数
+function switchPlayRoute(routeIndex, vodName, sourceCode, vodId) {
+    if (!currentRoutes || !currentRoutes[routeIndex]) return;
+    currentActiveRouteIndex = routeIndex;
+    const targetRoute = currentRoutes[routeIndex];
+    currentEpisodes = targetRoute.episodes.map(e => e.url);
+    currentEpisodeNames = targetRoute.episodes.map(e => e.name);
+    currentEpisodeIndex = 0;
+
+    // 更新各线路按钮的样式
+    document.querySelectorAll('.route-tab-btn').forEach((btn, i) => {
+        if (i === routeIndex) {
+            btn.className = 'route-tab-btn px-2.5 py-1 rounded text-xs transition-all bg-blue-600 text-white font-medium shadow';
+        } else {
+            btn.className = 'route-tab-btn px-2.5 py-1 rounded text-xs transition-all bg-[#222] hover:bg-[#333] text-gray-300';
+        }
+    });
+
+    // 更新剧集总数显示
+    const countEl = document.getElementById('routeEpisodeCount');
+    if (countEl) {
+        countEl.textContent = `共 ${currentEpisodes.length} 集`;
+    }
+
+    // 重新渲染剧集列表
+    const grid = document.getElementById('episodesGrid');
+    if (grid) {
+        grid.innerHTML = renderEpisodes(vodName || currentVideoTitle, sourceCode, vodId);
+    }
+}
+
+// 辅助函数用于渲染剧集按钮（使用当前的排序状态，支持展示剧集真实名称）
+function renderEpisodes(vodName, sourceCode, vodId) {
+    const episodes = episodesReversed ? [...currentEpisodes].reverse() : currentEpisodes;
+    const names = currentEpisodeNames && currentEpisodeNames.length === currentEpisodes.length
+        ? (episodesReversed ? [...currentEpisodeNames].reverse() : currentEpisodeNames)
+        : null;
+
+    return episodes.map((episode, index) => {
+        // 根据倒序状态计算真实的剧集索引
+        const realIndex = episodesReversed ? currentEpisodes.length - 1 - index : index;
+        const displayName = (names && names[index]) ? names[index] : (realIndex + 1);
+        return `
+            <button id="episode-${realIndex}" onclick="playVideo('${episode}','${(vodName || '').replace(/"/g, '&quot;')}', '${sourceCode}', ${realIndex}, '${vodId}')" 
+                    class="px-2.5 py-2 bg-[#222] hover:bg-[#333] border border-[#333] rounded-lg transition-colors text-center text-xs truncate episode-btn"
+                    title="${displayName}">
+                ${displayName}
+            </button>
+        `;
+    }).join('');
 }
 
 // 更新播放视频函数，修改为使用/watch路径而不是直接打开player.html
@@ -1354,3 +1446,268 @@ function saveStringAsFile(content, fileName) {
 }
 
 // 移除Node.js的require语句，因为这是在浏览器环境中运行的
+
+// ==========================================
+// TVBox 接口导入与管理交互逻辑 (Cloudflare Pages 原生支持)
+// ==========================================
+
+function openTvboxModal() {
+    const modal = document.getElementById('tvboxModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        switchTvboxTab('url');
+    }
+}
+
+function closeTvboxModal() {
+    const modal = document.getElementById('tvboxModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function switchTvboxTab(tabName) {
+    const tabs = ['url', 'json', 'builtin'];
+    tabs.forEach(t => {
+        const pane = document.getElementById(`tvboxTab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        const btn = document.getElementById(`tabBtn${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        if (pane) {
+            if (t === tabName) {
+                pane.classList.remove('hidden');
+            } else {
+                pane.classList.add('hidden');
+            }
+        }
+        if (btn) {
+            if (t === tabName) {
+                btn.className = 'px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium transition-colors';
+            } else {
+                btn.className = 'px-3 py-1.5 rounded-lg bg-[#222] text-gray-400 hover:text-white transition-colors';
+            }
+        }
+    });
+}
+
+function showTvboxStatus(msg, type = 'info') {
+    const el = document.getElementById('tvboxStatusMsg');
+    if (!el) return;
+    el.classList.remove('hidden', 'bg-blue-900/40', 'text-blue-300', 'bg-red-900/40', 'text-red-300', 'bg-green-900/40', 'text-green-300', 'border-blue-700/50', 'border-red-700/50', 'border-green-700/50');
+    if (type === 'error') {
+        el.classList.add('bg-red-900/40', 'text-red-300', 'border', 'border-red-700/50');
+    } else if (type === 'success') {
+        el.classList.add('bg-green-900/40', 'text-green-300', 'border', 'border-green-700/50');
+    } else {
+        el.classList.add('bg-blue-900/40', 'text-blue-300', 'border', 'border-blue-700/50');
+    }
+    el.innerHTML = msg;
+}
+
+async function parseTvboxFromUrl() {
+    const input = document.getElementById('tvboxUrlInput');
+    const url = input ? input.value.trim() : '';
+    if (!url) {
+        showToast('请输入有效的 TVBox 订阅 URL', 'warning');
+        return;
+    }
+
+    const btn = document.getElementById('btnFetchTvbox');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="inline-block animate-spin mr-1">↻</span> 正在拉取...';
+    }
+    showTvboxStatus('正在通过边缘代理拉取订阅配置...', 'info');
+
+    try {
+        const result = await window.TVBox.fetchAndParseUrl(url);
+        renderTvboxSitesPreview(result);
+        showTvboxStatus(`解析成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+    } catch (e) {
+        console.error('拉取 TVBox 订阅失败:', e);
+        showTvboxStatus(`拉取失败: ${e.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span>拉取并解析</span>';
+        }
+    }
+}
+
+function parseTvboxFromJsonText() {
+    const textarea = document.getElementById('tvboxJsonInput');
+    const text = textarea ? textarea.value.trim() : '';
+    if (!text) {
+        showToast('请粘贴 TVBox 配置 JSON 或 Base64 文本', 'warning');
+        return;
+    }
+
+    try {
+        const result = window.TVBox.parseConfigText(text);
+        renderTvboxSitesPreview(result);
+        showTvboxStatus(`解析成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+    } catch (e) {
+        console.error('解析 TVBox 配置失败:', e);
+        showTvboxStatus(`解析失败: ${e.message}`, 'error');
+    }
+}
+
+function loadBuiltinTvboxSites() {
+    try {
+        const rawMap = window.BUILTIN_CUSTOMER_SITES || {};
+        const sites = Object.keys(rawMap).map((k) => ({
+            key: k,
+            name: rawMap[k].name,
+            api: rawMap[k].api,
+            type: rawMap[k].type || 1,
+            compatible: true,
+            reason: '内置精选源'
+        }));
+
+        const result = {
+            compatibleSites: sites,
+            incompatibleSites: [],
+            total: sites.length
+        };
+
+        renderTvboxSitesPreview(result);
+        showTvboxStatus(`已载入 ${sites.length} 个内置精选源，涵盖短剧、4K影视、音乐听书等`, 'success');
+    } catch (e) {
+        showTvboxStatus(`载入精选源失败: ${e.message}`, 'error');
+    }
+}
+
+function renderTvboxSitesPreview(result) {
+    currentParsedTvboxSites = result.compatibleSites || [];
+    const previewArea = document.getElementById('tvboxPreviewArea');
+    const countEl = document.getElementById('tvboxCompatibleCount');
+    const hintEl = document.getElementById('tvboxIncompatibleHint');
+    const container = document.getElementById('tvboxSitesContainer');
+
+    if (!previewArea || !container) return;
+
+    previewArea.classList.remove('hidden');
+    if (countEl) countEl.textContent = currentParsedTvboxSites.length;
+    if (hintEl) {
+        if (result.incompatibleSites && result.incompatibleSites.length > 0) {
+            hintEl.textContent = `(已跳过 ${result.incompatibleSites.length} 个 Dex Jar 爬虫)`;
+        } else {
+            hintEl.textContent = '';
+        }
+    }
+
+    if (currentParsedTvboxSites.length === 0) {
+        container.innerHTML = '<div class="text-center py-6 text-gray-500 text-xs">未找到可导入的兼容视频源</div>';
+        return;
+    }
+
+    container.innerHTML = currentParsedTvboxSites.map((site, index) => {
+        const typeBadge = site.type === 4
+            ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/60 text-purple-300 border border-purple-700/50">T4 HTTP</span>'
+            : (site.type === 0
+                ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/50">CMS XML</span>'
+                : '<span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">CMS JSON</span>');
+
+        return `
+            <div class="flex items-center justify-between p-2 bg-[#1c1c1c] hover:bg-[#222] rounded border border-[#2a2a2a] transition-colors" id="tvbox-site-row-${index}">
+                <div class="flex items-center space-x-2 flex-1 min-w-0 mr-2">
+                    <input type="checkbox" id="tvbox_check_${index}" checked class="form-checkbox h-3.5 w-3.5 text-blue-600 rounded bg-[#2a2a2a] border-[#444] cursor-pointer">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center space-x-1.5">
+                            <label for="tvbox_check_${index}" class="text-xs font-medium text-white truncate cursor-pointer">${site.name}</label>
+                            ${typeBadge}
+                        </div>
+                        <div class="text-[10px] text-gray-500 truncate" title="${site.api}">${site.api}</div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 flex-shrink-0">
+                    <span id="tvbox_latency_${index}" class="text-[11px] text-gray-400 font-mono">--</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function selectAllTvboxSites(checked) {
+    if (!currentParsedTvboxSites) return;
+    currentParsedTvboxSites.forEach((_, idx) => {
+        const cb = document.getElementById(`tvbox_check_${idx}`);
+        if (cb) cb.checked = checked;
+    });
+}
+
+async function testAllTvboxLatency() {
+    if (!currentParsedTvboxSites || currentParsedTvboxSites.length === 0) return;
+    const btn = document.getElementById('btnTvboxSpeedTest');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="inline-block animate-spin mr-1">↻</span> 测速中...';
+    }
+
+    const promises = currentParsedTvboxSites.map(async (site, idx) => {
+        const latencyEl = document.getElementById(`tvbox_latency_${idx}`);
+        if (latencyEl) latencyEl.innerHTML = '<span class="text-gray-500">检测中...</span>';
+        const res = await window.TVBox.testSiteLatency(site.api);
+        if (latencyEl) {
+            if (res.success) {
+                const color = res.latency < 800 ? 'text-emerald-400' : (res.latency < 2000 ? 'text-yellow-400' : 'text-orange-400');
+                latencyEl.innerHTML = `<span class="${color}">${res.latency}ms</span>`;
+            } else {
+                latencyEl.innerHTML = `<span class="text-red-400" title="${res.error || '失败'}">不可用</span>`;
+            }
+        }
+    });
+
+    await Promise.allSettled(promises);
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡ 一键测速</span>';
+    }
+}
+
+function applyTvboxImport(overwrite = false) {
+    if (!currentParsedTvboxSites || currentParsedTvboxSites.length === 0) {
+        showToast('暂无解析出的站点可供导入', 'warning');
+        return;
+    }
+
+    const selectedSites = [];
+    currentParsedTvboxSites.forEach((site, idx) => {
+        const cb = document.getElementById(`tvbox_check_${idx}`);
+        if (cb && cb.checked) {
+            selectedSites.push(site);
+        }
+    });
+
+    if (selectedSites.length === 0) {
+        showToast('请至少勾选一个要导入的站点', 'warning');
+        return;
+    }
+
+    if (overwrite && !confirm('确认覆盖导入？这将清空您之前保存的自定义接口！')) {
+        return;
+    }
+
+    const res = window.TVBox.importSitesToCustom(selectedSites, overwrite);
+    if (res.success) {
+        // 重新从 localStorage 加载并渲染自定义源列表
+        customAPIs = JSON.parse(localStorage.getItem('customAPIs') || '[]');
+        selectedAPIs = JSON.parse(localStorage.getItem('selectedAPIs') || '[]');
+        renderCustomAPIsList();
+        updateSelectedApiCount();
+        initAPICheckboxes();
+        showToast(res.message, 'success');
+        closeTvboxModal();
+    } else {
+        showToast(res.message || '导入失败', 'error');
+    }
+}
+
+function exportTvboxConfig() {
+    try {
+        const jsonStr = window.TVBox.exportToTvboxJson();
+        saveStringAsFile(jsonStr, 'LibreTV_TVBox_Config_' + Date.now() + '.json');
+        showToast('已导出 TVBox 标准配置文件', 'success');
+    } catch (e) {
+        console.error('导出失败:', e);
+        showToast('导出失败: ' + e.message, 'error');
+    }
+}
