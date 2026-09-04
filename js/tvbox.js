@@ -31,11 +31,42 @@
         },
 
         /**
+         * 纯前端容错清洗 JSON 文本（移除 UTF-8 BOM、单行/多行注释、尾随逗号）
+         */
+        sanitizeJsonText: function(text) {
+            if (!text || typeof text !== 'string') return '';
+            let s = text.trim();
+            if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+            // 移除 // 单行注释 (不破坏 http:// 与 https://)
+            s = s.replace(/(^|[^:])\/\/.*$/gm, '$1');
+            // 移除 /* ... */ 块级注释
+            s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+            // 移除数组或对象末尾的非标准逗号 (如 {"a": 1,} 或 [1, 2,])
+            s = s.replace(/,\s*([\}\]])/g, '$1');
+            return s.trim();
+        },
+
+        /**
+         * 解包 TVBox 中常见的本地代理回环 URL
+         * 例如将 http://127.0.0.1:10079/p/0/proxy/https://ikunzyapi.com/api.php/provide/vod/?
+         * 还原为 https://ikunzyapi.com/api.php/provide/vod/?
+         */
+        unwrapProxyUrl: function(url) {
+            if (!url || typeof url !== 'string') return '';
+            let u = url.trim();
+            const match = u.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/[^?#]*?(https?:\/\/.*)$/i);
+            if (match && match[1]) {
+                return match[1];
+            }
+            return u;
+        },
+
+        /**
          * 标准化 API URL
          */
         normalizeApiUrl: function(url) {
             if (!url || typeof url !== 'string') return '';
-            let u = url.trim();
+            let u = this.unwrapProxyUrl(url);
             // 兼容非 http(s) 开头
             if (!/^https?:\/\//i.test(u)) {
                 u = 'http://' + u;
@@ -45,18 +76,29 @@
 
         /**
          * 检查接口类型兼容性
-         * 返回: { compatible: boolean, reason: string, standardType: number }
+         * 返回: { compatible: boolean, reason: string, standardType: number, effectiveApi?: string }
          */
         checkCompatibility: function(site) {
-            if (!site || !site.api) {
-                return { compatible: false, reason: '缺少 API 地址', standardType: -1 };
+            if (!site) {
+                return { compatible: false, reason: '无效站点配置', standardType: -1 };
             }
 
-            const rawType = parseInt(site.type, 10);
-            const api = (site.api || '').toLowerCase();
+            const rawApi = this.normalizeApiUrl(site.api || site.url || '');
+            const rawType = typeof site.type !== 'undefined' ? parseInt(site.type, 10) : 1;
+            const apiLower = rawApi.toLowerCase();
+            const extStr = typeof site.ext === 'string' ? this.unwrapProxyUrl(site.ext.trim()) : '';
 
-            // Type 3: Spider 爬虫 (通常是 Android DEX Jar，浏览器环境无法执行)
+            // Type 3: Spider 爬虫
             if (rawType === 3) {
+                // 很多 TVBox 站点虽然标为 type: 3，但实际是 AppYsV2 / XBPQ，其 ext 属性是一个直接的苹果 CMS / 采集接口
+                if (extStr && /^https?:\/\//i.test(extStr) && (extStr.includes('provide/vod') || extStr.includes('api.php'))) {
+                    return {
+                        compatible: true,
+                        reason: 'Type 3 包装的 CMS 扩展接口',
+                        standardType: 1,
+                        effectiveApi: extStr
+                    };
+                }
                 return {
                     compatible: false,
                     reason: 'TVBox Type 3 Jar 爬虫依赖 Android 虚拟机环境，纯 Web/CF 端暂不支持原生运行',
@@ -64,27 +106,31 @@
                 };
             }
 
+            if (!rawApi) {
+                return { compatible: false, reason: '缺少 API 地址', standardType: -1 };
+            }
+
             // Type 4: Hipy / T4 HTTP 爬虫接口
             if (rawType === 4) {
-                return { compatible: true, reason: 'T4 HTTP 接口，支持自适应解析', standardType: 4 };
+                return { compatible: true, reason: 'T4 HTTP 接口，支持自适应解析', standardType: 4, effectiveApi: rawApi };
             }
 
             // Type 0: 苹果/海洋 CMS XML 接口
-            if (rawType === 0 || api.includes('at/xml')) {
-                return { compatible: true, reason: 'CMS XML 接口，支持自适应解析', standardType: 0 };
+            if (rawType === 0 || apiLower.includes('at/xml')) {
+                return { compatible: true, reason: 'CMS XML 接口，支持自适应解析', standardType: 0, effectiveApi: rawApi };
             }
 
             // Type 1: 苹果 CMS JSON 接口 (原生 100% 完美支持)
-            if (rawType === 1 || api.includes('provide/vod') || api.includes('api.php') || api.includes('/vod')) {
-                return { compatible: true, reason: '标准 CMS JSON 接口，原生支持', standardType: 1 };
+            if (rawType === 1 || apiLower.includes('provide/vod') || apiLower.includes('api.php') || apiLower.includes('/vod')) {
+                return { compatible: true, reason: '标准 CMS JSON 接口，原生支持', standardType: 1, effectiveApi: rawApi };
             }
 
             // 默认尝试作为 CMS 接口解析
-            return { compatible: true, reason: '通用视频采集接口', standardType: 1 };
+            return { compatible: true, reason: '通用视频采集接口', standardType: 1, effectiveApi: rawApi };
         },
 
         /**
-         * 解析 TVBox 配置内容 (支持 JSON 文本或 Base64 密文)
+         * 解析 TVBox 配置内容 (支持 JSON 文本或 Base64 密文，自动识别单仓与多仓)
          */
         parseConfigText: function(rawContent) {
             if (!rawContent || typeof rawContent !== 'string') {
@@ -92,22 +138,29 @@
             }
 
             let text = rawContent.trim();
+            // 常见 TVBox 加密前缀去除 (部分配置带有 ** 或 特殊前缀)
+            if (text.startsWith('**')) text = text.slice(2).trim();
+
             let parsedData = null;
 
-            // 1. 尝试直接作为 JSON 解析
+            // 1. 尝试直接作为容错 JSON 解析
             try {
-                parsedData = JSON.parse(text);
+                const cleaned = this.sanitizeJsonText(text);
+                parsedData = JSON.parse(cleaned);
             } catch (e) {
                 // 2. 尝试 Base64 解码后再解析
                 const decoded = this.decodeBase64Utf8(text);
                 if (decoded) {
                     try {
-                        parsedData = JSON.parse(decoded);
+                        const cleanedDecoded = this.sanitizeJsonText(decoded);
+                        parsedData = JSON.parse(cleanedDecoded);
                     } catch (err) {
                         // 尝试在解码文本中查找 JSON 结构
                         const jsonMatch = decoded.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
                         if (jsonMatch) {
-                            parsedData = JSON.parse(jsonMatch[0]);
+                            try {
+                                parsedData = JSON.parse(this.sanitizeJsonText(jsonMatch[0]));
+                            } catch (e3) {}
                         }
                     }
                 }
@@ -117,31 +170,47 @@
                 throw new Error('无法解析配置内容，请确认是否为合法的 JSON 或 Base64 TVBox 订阅格式');
             }
 
-            // 提取 sites 数组 (可能在 parsedData.sites 中，或 parsedData 本身就是数组)
+            // 3. 自动识别多仓聚合格式 (Multi-warehouse)
+            if (Array.isArray(parsedData.urls) && parsedData.urls.length > 0) {
+                const warehouseLines = parsedData.urls.map((u, i) => ({
+                    name: (u.name || `线路 ${i + 1}`).trim(),
+                    url: (u.url || '').trim()
+                })).filter(u => u.url.length > 0);
+
+                return {
+                    isMultiWarehouse: true,
+                    warehouses: warehouseLines,
+                    spider: parsedData.spider || '',
+                    compatibleSites: [],
+                    incompatibleSites: [],
+                    total: warehouseLines.length
+                };
+            }
+
+            // 4. 提取 sites 数组 (可能在 parsedData.sites 中，或 parsedData 本身就是数组)
             let rawSites = [];
             if (Array.isArray(parsedData)) {
                 rawSites = parsedData;
             } else if (Array.isArray(parsedData.sites)) {
                 rawSites = parsedData.sites;
             } else {
-                throw new Error('配置中未包含有效的 sites 视频源列表');
+                throw new Error('配置中未包含有效的 sites 视频源列表或 urls 多仓线路');
             }
 
             const compatibleSites = [];
             const incompatibleSites = [];
 
             rawSites.forEach((s, index) => {
-                if (!s || (!s.api && !s.url)) return;
-                const siteApi = this.normalizeApiUrl(s.api || s.url);
+                if (!s || (!s.api && !s.url && !s.ext)) return;
+                const check = this.checkCompatibility(s);
+                const finalApi = check.effectiveApi || this.normalizeApiUrl(s.api || s.url || '');
                 const siteName = (s.name || s.key || `TVBox源_${index + 1}`).trim();
                 const siteKey = (s.key || `tvbox_${index}_${Date.now()}`).replace(/[^\w-]/g, '_');
-                const siteType = typeof s.type !== 'undefined' ? parseInt(s.type, 10) : 1;
 
-                const check = this.checkCompatibility({ ...s, api: siteApi, type: siteType });
                 const siteObj = {
                     key: siteKey,
                     name: siteName,
-                    api: siteApi,
+                    api: finalApi,
                     type: check.standardType,
                     detail: s.detail || '',
                     ext: s.ext || '',
@@ -160,6 +229,7 @@
             });
 
             return {
+                isMultiWarehouse: false,
                 spider: parsedData.spider || '',
                 parses: parsedData.parses || [],
                 compatibleSites: compatibleSites,

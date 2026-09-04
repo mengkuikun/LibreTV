@@ -654,10 +654,20 @@ async function search() {
         // 等待所有搜索请求完成
         const resultsArray = await Promise.all(searchPromises);
 
-        // 合并所有结果
+        // 合并所有结果并进行严格源内与全局唯一性去重
+        const seenGlobalKeys = new Set();
         resultsArray.forEach(results => {
             if (Array.isArray(results) && results.length > 0) {
-                allResults = allResults.concat(results);
+                results.forEach(item => {
+                    if (!item) return;
+                    const srcKey = item.source_code || item.source_name || 'unknown_src';
+                    const vidKey = item.vod_id ? String(item.vod_id) : (item.vod_name || '');
+                    const uniqueKey = `${srcKey}##${vidKey}`;
+                    if (!seenGlobalKeys.has(uniqueKey)) {
+                        seenGlobalKeys.add(uniqueKey);
+                        allResults.push(item);
+                    }
+                });
             }
         });
 
@@ -1502,12 +1512,16 @@ function showTvboxStatus(msg, type = 'info') {
     el.innerHTML = msg;
 }
 
-async function parseTvboxFromUrl() {
+async function parseTvboxFromUrl(targetUrlOverride) {
     const input = document.getElementById('tvboxUrlInput');
-    const url = input ? input.value.trim() : '';
+    const url = targetUrlOverride || (input ? input.value.trim() : '');
     if (!url) {
         showToast('请输入有效的 TVBox 订阅 URL', 'warning');
         return;
+    }
+
+    if (targetUrlOverride && input) {
+        input.value = targetUrlOverride;
     }
 
     const btn = document.getElementById('btnFetchTvbox');
@@ -1519,8 +1533,39 @@ async function parseTvboxFromUrl() {
 
     try {
         const result = await window.TVBox.fetchAndParseUrl(url);
+        
+        const multiArea = document.getElementById('tvboxMultiWarehouseArea');
+        const select = document.getElementById('tvboxWarehouseSelect');
+        const badge = document.getElementById('tvboxWarehouseCountBadge');
+
+        // 如果是多仓聚合
+        if (result.isMultiWarehouse) {
+            if (multiArea && select) {
+                multiArea.classList.remove('hidden');
+                if (badge) badge.textContent = `检测到多仓聚合订阅（共 ${result.warehouses.length} 条线路）`;
+                select.innerHTML = result.warehouses.map((w, idx) => `
+                    <option value="${encodeURIComponent(w.url)}">${w.name || ('线路 ' + (idx + 1))}</option>
+                `).join('');
+            }
+            showTvboxStatus(`🎉 解析成功！检测到多仓聚合（包含 ${result.warehouses.length} 条线路），请在下方下拉菜单中选择线路载入源。`, 'success');
+            // 默认自动拉取第一条线路
+            if (result.warehouses.length > 0 && !targetUrlOverride) {
+                loadSelectedWarehouseLine();
+            }
+            return;
+        }
+
+        // 单仓或已解析完成
+        if (multiArea && !targetUrlOverride) {
+            multiArea.classList.add('hidden');
+        }
+
         renderTvboxSitesPreview(result);
-        showTvboxStatus(`解析成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+        if (result.compatibleSites.length > 0) {
+            showTvboxStatus(`解析成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+        } else {
+            showTvboxStatus(`解析完成：此订阅中未发现网页直接兼容的 CMS 源${result.incompatibleSites.length ? `（已过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'info');
+        }
     } catch (e) {
         console.error('拉取 TVBox 订阅失败:', e);
         showTvboxStatus(`拉取失败: ${e.message}`, 'error');
@@ -1528,6 +1573,36 @@ async function parseTvboxFromUrl() {
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = '<span>拉取并解析</span>';
+        }
+    }
+}
+
+// 载入选中的多仓子线路
+async function loadSelectedWarehouseLine() {
+    const select = document.getElementById('tvboxWarehouseSelect');
+    if (!select || !select.value) return;
+    const subUrl = decodeURIComponent(select.value);
+    const btn = document.getElementById('btnLoadWarehouse');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '载入中...';
+    }
+    showTvboxStatus(`正在载入选中的多仓线路: ${select.options[select.selectedIndex]?.text || ''}...`, 'info');
+
+    try {
+        const result = await window.TVBox.fetchAndParseUrl(subUrl);
+        renderTvboxSitesPreview(result);
+        if (result.compatibleSites.length > 0) {
+            showTvboxStatus(`线路载入成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+        } else {
+            showTvboxStatus(`线路载入完成：该线路无网页兼容源${result.incompatibleSites.length ? `（已跳过 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'info');
+        }
+    } catch (e) {
+        showTvboxStatus(`载入线路失败: ${e.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '载入此线路';
         }
     }
 }
@@ -1542,25 +1617,56 @@ function parseTvboxFromJsonText() {
 
     try {
         const result = window.TVBox.parseConfigText(text);
+        if (result.isMultiWarehouse) {
+            const multiArea = document.getElementById('tvboxMultiWarehouseArea');
+            const select = document.getElementById('tvboxWarehouseSelect');
+            const badge = document.getElementById('tvboxWarehouseCountBadge');
+            if (multiArea && select) {
+                multiArea.classList.remove('hidden');
+                if (badge) badge.textContent = `检测到多仓聚合配置（共 ${result.warehouses.length} 条线路）`;
+                select.innerHTML = result.warehouses.map((w, idx) => `
+                    <option value="${encodeURIComponent(w.url)}">${w.name || ('线路 ' + (idx + 1))}</option>
+                `).join('');
+            }
+            showTvboxStatus(`解析成功！检测到多仓配置（共 ${result.warehouses.length} 条线路），请点击载入子线路`, 'success');
+            return;
+        }
+
         renderTvboxSitesPreview(result);
-        showTvboxStatus(`解析成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+        if (result.compatibleSites.length > 0) {
+            showTvboxStatus(`解析成功！共识别出 ${result.compatibleSites.length} 个兼容源${result.incompatibleSites.length ? `（已自动过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'success');
+        } else {
+            showTvboxStatus(`解析完成：未发现兼容源${result.incompatibleSites.length ? `（已过滤 ${result.incompatibleSites.length} 个 Dex Jar 爬虫）` : ''}`, 'info');
+        }
     } catch (e) {
         console.error('解析 TVBox 配置失败:', e);
         showTvboxStatus(`解析失败: ${e.message}`, 'error');
     }
 }
 
-function loadBuiltinTvboxSites() {
+function loadBuiltinTvboxSites(presetType = 'default') {
     try {
-        const rawMap = window.BUILTIN_CUSTOMER_SITES || {};
-        const sites = Object.keys(rawMap).map((k) => ({
-            key: k,
-            name: rawMap[k].name,
-            api: rawMap[k].api,
-            type: rawMap[k].type || 1,
-            compatible: true,
-            reason: '内置精选源'
-        }));
+        let sites = [];
+        if (presetType === 'mainstream') {
+            sites = [
+                { key: 'bfzy', name: '暴风资源', api: 'https://bfzyapi.com/api.php/provide/vod', type: 1, compatible: true, reason: '主流影视源' },
+                { key: 'lzzy', name: '量子资源', api: 'http://cj.lziapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
+                { key: 'ffzy', name: '非凡资源', api: 'http://cj.ffzyapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
+                { key: 'snzy', name: '索尼资源', api: 'https://suoniapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
+                { key: 'hhzy', name: '豪华资源', api: 'https://hhzyapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
+                { key: 'kczy', name: '快车资源', api: 'https://caiji.kczyapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' }
+            ];
+        } else {
+            const rawMap = window.BUILTIN_CUSTOMER_SITES || {};
+            sites = Object.keys(rawMap).map((k) => ({
+                key: k,
+                name: rawMap[k].name,
+                api: rawMap[k].api,
+                type: rawMap[k].type || 1,
+                compatible: true,
+                reason: '精选 17 源'
+            }));
+        }
 
         const result = {
             compatibleSites: sites,
@@ -1569,7 +1675,7 @@ function loadBuiltinTvboxSites() {
         };
 
         renderTvboxSitesPreview(result);
-        showTvboxStatus(`已载入 ${sites.length} 个内置精选源，涵盖短剧、4K影视、音乐听书等`, 'success');
+        showTvboxStatus(`已载入 ${sites.length} 个兼容视频采集源，可勾选后点击下方按钮导入！`, 'success');
     } catch (e) {
         showTvboxStatus(`载入精选源失败: ${e.message}`, 'error');
     }
@@ -1595,7 +1701,29 @@ function renderTvboxSitesPreview(result) {
     }
 
     if (currentParsedTvboxSites.length === 0) {
-        container.innerHTML = '<div class="text-center py-6 text-gray-500 text-xs">未找到可导入的兼容视频源</div>';
+        const jarCount = result.incompatibleSites ? result.incompatibleSites.length : 0;
+        if (jarCount > 0) {
+            container.innerHTML = `
+                <div class="text-center py-6 px-4 bg-[#1a1a1a] rounded-lg border border-[#2b2b2b]">
+                    <div class="text-3xl mb-2">💡</div>
+                    <h4 class="text-xs font-semibold text-amber-400 mb-1.5">当前订阅中全部站点（共 ${jarCount} 个）为 Android 专属 Dex Jar 爬虫</h4>
+                    <p class="text-[11px] text-gray-400 leading-relaxed max-w-md mx-auto mb-3">
+                        此类源专供安卓手机/电视 TVBox APK 内的 Dalvik/ART 虚拟机动态加载，由于网页端与 Cloudflare Workers 受浏览器沙箱安全机制限制，无法执行安卓二进制代码。<br>
+                        建议导入包含标准采集接口（Type 0/1/4 CMS）的 TVBox 订阅，或直接点击下方按钮使用精选源！
+                    </p>
+                    <div class="flex justify-center space-x-2">
+                        <button onclick="loadBuiltinTvboxSites('default')" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition-colors">
+                            ⚡ 一键载入 17 个全能精选源
+                        </button>
+                        <button onclick="loadBuiltinTvboxSites('mainstream')" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors">
+                            🎬 一键载入主流影视仓
+                        </button>
+                    </div>
+                </div>
+            `;
+        } else {
+            container.innerHTML = '<div class="text-center py-6 text-gray-500 text-xs">未找到可导入的视频源</div>';
+        }
         return;
     }
 
