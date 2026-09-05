@@ -141,6 +141,31 @@
             // 常见 TVBox 加密前缀去除 (部分配置带有 ** 或 特殊前缀)
             if (text.startsWith('**')) text = text.slice(2).trim();
 
+            // 0. 如果用户直接输入/粘贴了单条 http(s) 链接（如单个 CMS 接口或采集站 URL）
+            if (/^https?:\/\/[^\s]+$/i.test(text)) {
+                const siteName = this.detectCmsNameFromUrl(text);
+                const isXml = /xml/i.test(text);
+                return {
+                    isMultiWarehouse: false,
+                    spider: '',
+                    parses: [],
+                    compatibleSites: [{
+                        key: 'cms_' + Date.now(),
+                        name: siteName,
+                        api: text,
+                        type: isXml ? 0 : 1,
+                        detail: '',
+                        ext: '',
+                        searchable: 1,
+                        quickSearch: 1,
+                        compatible: true,
+                        reason: `已识别为标准 CMS ${isXml ? 'XML' : 'JSON'} 采集接口`
+                    }],
+                    incompatibleSites: [],
+                    total: 1
+                };
+            }
+
             let parsedData = null;
 
             // 1. 尝试直接作为容错 JSON 解析
@@ -167,7 +192,30 @@
             }
 
             if (!parsedData) {
-                throw new Error('无法解析配置内容，请确认是否为合法的 JSON 或 Base64 TVBox 订阅格式');
+                throw new Error('无法解析配置内容，请确认是否为合法的 JSON、Base64 TVBox 订阅或 CMS 接口链接');
+            }
+
+            // 2.5 自动兼容用户粘贴或接口直接返回的 CMS 数据响应 (包含 list 数组或 code/page 属性)
+            if (parsedData && (Array.isArray(parsedData.list) || typeof parsedData.page !== 'undefined' || (parsedData.code === 1 && parsedData.msg))) {
+                return {
+                    isMultiWarehouse: false,
+                    spider: '',
+                    parses: [],
+                    compatibleSites: [{
+                        key: 'cms_' + Date.now(),
+                        name: '自定义 CMS 采集接口',
+                        api: '',
+                        type: 1,
+                        detail: '',
+                        ext: '',
+                        searchable: 1,
+                        quickSearch: 1,
+                        compatible: true,
+                        reason: '成功识别标准 CMS 采集数据响应'
+                    }],
+                    incompatibleSites: [],
+                    total: 1
+                };
             }
 
             // 3. 自动识别多仓聚合格式 (Multi-warehouse)
@@ -239,14 +287,135 @@
         },
 
         /**
-         * 从远程 URL 加载并解析 TVBox 配置
+         * 根据 URL 或元数据自动推测友好的 CMS 源名称
+         */
+        detectCmsNameFromUrl: function(url) {
+            if (!url) return '自定义采集源';
+            const u = url.toLowerCase();
+            if (u.includes('guangsu')) return '光速资源';
+            if (u.includes('360zy')) return '360资源';
+            if (u.includes('dyttzy') || u.includes('dytt')) return '电影天堂';
+            if (u.includes('jszy')) return '极速资源';
+            if (u.includes('mdzy')) return '魔都资源';
+            if (u.includes('huya')) return '虎牙采集';
+            if (u.includes('rycj') || u.includes('ruyi')) return '如意影视';
+            if (u.includes('apibdzy') || u.includes('bdzy')) return '百度云资源';
+            if (u.includes('klhj') || u.includes('serv00')) return '克隆合集';
+            if (u.includes('bfzy')) return '暴风资源';
+            if (u.includes('lzi') || u.includes('lzzy')) return '量子资源';
+            if (u.includes('ffzy')) return '非凡资源';
+            if (u.includes('jyzy') || u.includes('jinying')) return '金鹰资源';
+            if (u.includes('wujin')) return '无尽资源';
+            if (u.includes('qijiyun')) return '奇迹云4K';
+            
+            try {
+                const host = new URL(url).hostname;
+                return host.replace(/^api\./, '').replace(/\.(com|cn|me|net|xyz|vip|top|org)$/, '') + '资源';
+            } catch (e) {
+                return '自定义采集源';
+            }
+        },
+
+        /**
+         * 探测并包装单个 CMS 采集接口
+         */
+        probeSingleCmsUrl: async function(targetUrl) {
+            const cleanBase = targetUrl.trim();
+            const hasQ = cleanBase.includes('?');
+            const sep = hasQ ? '&' : (cleanBase.endsWith('/') ? '?' : '/?');
+            const testUrl = `${cleanBase}${sep}ac=videolist&wd=test`;
+
+            const proxyBase = typeof PROXY_URL !== 'undefined' ? PROXY_URL : '/proxy/';
+            let proxiedUrl = proxyBase + encodeURIComponent(testUrl);
+            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                proxiedUrl = await window.ProxyAuth.addAuthToProxyUrl(proxiedUrl);
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+            try {
+                const res = await fetch(proxiedUrl, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                const text = await res.text();
+                const isJson = text.includes('"list"') || text.includes('"code"');
+                const isXml = text.includes('<video>') || text.includes('<rss');
+
+                if (res.ok && (isJson || isXml)) {
+                    const siteName = this.detectCmsNameFromUrl(targetUrl);
+                    const site = {
+                        key: 'cms_' + Date.now(),
+                        name: siteName,
+                        api: cleanBase,
+                        type: isXml ? 0 : 1,
+                        compatible: true,
+                        reason: `已识别为标准 CMS ${isJson ? 'JSON' : 'XML'} 采集接口`,
+                        searchable: 1,
+                        quickSearch: 1
+                    };
+                    return {
+                        isMultiWarehouse: false,
+                        spider: '',
+                        parses: [],
+                        compatibleSites: [site],
+                        incompatibleSites: [],
+                        total: 1
+                    };
+                }
+            } catch (e) {
+                clearTimeout(timeoutId);
+            }
+            return null;
+        },
+
+        /**
+         * 从远程 URL 加载并解析 TVBox 配置或单 CMS 采集源
          */
         fetchAndParseUrl: async function(configUrl) {
             if (!configUrl || !/^https?:\/\//i.test(configUrl.trim())) {
-                throw new Error('请输入合法的 http:// 或 https:// 订阅链接');
+                throw new Error('请输入合法的 http:// 或 https:// 接口或订阅链接');
             }
 
             const targetUrl = configUrl.trim();
+            
+            // 优先检查：如果链接特征为 CMS 采集站接口（如包含 provide/vod、api.php、seaxml 等），直接自适应探测
+            const isLikelyCms = /provide\/vod|api\.php|seaxml|at\/xml|ac=videolist/i.test(targetUrl);
+            if (isLikelyCms) {
+                let singleCmsResult = null;
+                try {
+                    singleCmsResult = await this.probeSingleCmsUrl(targetUrl);
+                } catch (e) {}
+                if (singleCmsResult && singleCmsResult.compatibleSites && singleCmsResult.compatibleSites.length > 0) {
+                    return singleCmsResult;
+                }
+                // 即便快速网络探测未通，因 URL 结构符合标准 CMS 接口特征，依然直接生成可用卡片供用户导入
+                const siteName = this.detectCmsNameFromUrl(targetUrl);
+                const isXml = /xml/i.test(targetUrl);
+                return {
+                    isMultiWarehouse: false,
+                    spider: '',
+                    parses: [],
+                    compatibleSites: [{
+                        key: 'cms_' + Date.now(),
+                        name: siteName,
+                        api: targetUrl,
+                        type: isXml ? 0 : 1,
+                        detail: '',
+                        ext: '',
+                        searchable: 1,
+                        quickSearch: 1,
+                        compatible: true,
+                        reason: `已识别为标准 CMS ${isXml ? 'XML' : 'JSON'} 采集接口`
+                    }],
+                    incompatibleSites: [],
+                    total: 1
+                };
+            }
+
             const proxyBase = typeof PROXY_URL !== 'undefined' ? PROXY_URL : '/proxy/';
             
             // 构建带签名的代理请求
@@ -269,11 +438,26 @@
                 clearTimeout(timeoutId);
 
                 if (!response.ok) {
-                    throw new Error(`获取订阅失败，HTTP状态码: ${response.status}`);
+                    throw new Error(`获取配置失败，HTTP状态码: ${response.status}`);
                 }
 
                 const text = await response.text();
-                return this.parseConfigText(text);
+                try {
+                    const parsed = this.parseConfigText(text);
+                    // 如果识别为单源但 api 字段未填（如 CMS JSON 响应），自动填充为请求的 targetUrl
+                    if (parsed.compatibleSites && parsed.compatibleSites.length === 1 && !parsed.compatibleSites[0].api) {
+                        parsed.compatibleSites[0].api = targetUrl;
+                        parsed.compatibleSites[0].name = this.detectCmsNameFromUrl(targetUrl);
+                    }
+                    return parsed;
+                } catch (parseErr) {
+                    // 如果 TVBox 订阅解析失败，尝试作为单源探测回退
+                    const fallbackCms = await this.probeSingleCmsUrl(targetUrl);
+                    if (fallbackCms) {
+                        return fallbackCms;
+                    }
+                    throw parseErr;
+                }
             } catch (e) {
                 clearTimeout(timeoutId);
                 if (e.name === 'AbortError') {

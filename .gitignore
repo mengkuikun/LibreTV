@@ -23,3 +23,9 @@ coverage
 *.sln
 *.sw?
 .env
+
+# Tests and scratch scripts
+scratch/
+test_*.js
+test_*.mjs
+*.test.js

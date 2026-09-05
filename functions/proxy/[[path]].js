@@ -25,11 +25,16 @@ const MEDIA_CONTENT_TYPES = ['video/', 'audio/', 'image/'];
  * 拦截发往 /proxy/* 的请求
  */
 export async function onRequest(context) {
-    const { request, env, next, waitUntil } = context; // next 和 waitUntil 可能需要
+    const { request, env, next, waitUntil } = context;
     const url = new URL(request.url);
+    const targetUrl = getTargetUrlFromPath(url.pathname);
 
-    // 验证鉴权（主函数调用）
-    const isValidAuth = await validateAuth(request, env);
+    if (!targetUrl) {
+        return createResponse("无效的代理请求。路径应为 /proxy/<经过编码的URL>", 400);
+    }
+
+    // 验证鉴权（主函数调用，静态图片与免密站点自动放行）
+    const isValidAuth = await validateAuth(request, env, targetUrl);
     if (!isValidAuth) {
         return new Response(JSON.stringify({
             success: false,
@@ -73,20 +78,27 @@ export async function onRequest(context) {
     // --- 辅助函数 ---
 
     // 验证代理请求的鉴权
-    async function validateAuth(request, env) {
+    async function validateAuth(request, env, targetUrl) {
+        // 若服务端未配置 PASSWORD 环境变量，视为公开免密模式，直接允许访问
+        const serverPassword = env.PASSWORD;
+        if (!serverPassword) {
+            return true;
+        }
+
+        // 静态图片和常见媒体资源允许直接加载，无需 auth 参数 (保证 <img> 标签直接可用)
+        if (targetUrl) {
+            const urlLower = targetUrl.toLowerCase();
+            const isStaticMedia = MEDIA_FILE_EXTENSIONS.some(ext => urlLower.includes(ext)) || urlLower.includes('doubanio.com');
+            if (isStaticMedia) {
+                return true;
+            }
+        }
+
         const url = new URL(request.url);
         const authHash = url.searchParams.get('auth');
         const timestamp = url.searchParams.get('t');
         
-        // 获取服务器端密码
-        const serverPassword = env.PASSWORD;
-        if (!serverPassword) {
-            console.error('服务器未设置 PASSWORD 环境变量，代理访问被拒绝');
-            return false;
-        }
-        
         // 使用 SHA-256 哈希算法（与其他平台保持一致）
-        // 在 Cloudflare Workers 中使用 crypto.subtle
         try {
             const encoder = new TextEncoder();
             const data = encoder.encode(serverPassword);
@@ -114,18 +126,6 @@ export async function onRequest(context) {
         }
         
         return true;
-    }
-
-    // 验证鉴权（主函数调用）
-    if (!validateAuth(request, env)) {
-        return new Response('Unauthorized', { 
-            status: 401,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-                'Access-Control-Allow-Headers': '*'
-            }
-        });
     }
 
     // 输出调试日志 (需要设置 DEBUG: true 环境变量)
@@ -248,13 +248,13 @@ export async function onRequest(context) {
 
     // 获取远程内容及其类型
     async function fetchContentWithType(targetUrl) {
+        const isDouban = targetUrl.includes('doubanio.com') || targetUrl.includes('douban.com');
         const headers = new Headers({
             'User-Agent': getRandomUserAgent(),
-            'Accept': '*/*',
-            // 尝试传递一些原始请求的头信息
+            'Accept': isDouban ? 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8' : '*/*',
             'Accept-Language': request.headers.get('Accept-Language') || 'zh-CN,zh;q=0.9,en;q=0.8',
-            // 尝试设置 Referer 为目标网站的域名，或者传递原始 Referer
-            'Referer': request.headers.get('Referer') || new URL(targetUrl).origin
+            // 豆瓣图片/API 必须传递豆瓣官方 Referer，否则触发 418 防盗链
+            'Referer': isDouban ? 'https://movie.douban.com/' : (request.headers.get('Referer') || new URL(targetUrl).origin)
         });
 
         try {
@@ -269,11 +269,18 @@ export async function onRequest(context) {
                  throw new Error(`HTTP error ${response.status}: ${response.statusText}. URL: ${targetUrl}. Body: ${errorBody.substring(0, 150)}`);
             }
 
-            // 读取响应内容为文本
-            const content = await response.text();
             const contentType = response.headers.get('Content-Type') || '';
+            const isMedia = isMediaFile(targetUrl, contentType) || contentType.startsWith('image/') || contentType.startsWith('video/') || contentType.startsWith('audio/') || isDouban;
+
+            // 二进制图片/媒体文件：直接以 Response 二进制流返回，绝不能转为 text() 破坏图像字节结构
+            if (isMedia) {
+                return { isBinary: true, response, contentType, responseHeaders: response.headers };
+            }
+
+            // 文本响应内容 (M3U8 / JSON / XML 等)
+            const content = await response.text();
             logDebug(`请求成功: ${targetUrl}, Content-Type: ${contentType}, 内容长度: ${content.length}`);
-            return { content, contentType, responseHeaders: response.headers }; // 同时返回原始响应头
+            return { isBinary: false, content, contentType, responseHeaders: response.headers };
 
         } catch (error) {
              logDebug(`请求彻底失败: ${targetUrl}: ${error.message}`);
@@ -539,7 +546,23 @@ export async function onRequest(context) {
         }
 
         // --- 实际请求 ---
-        const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl);
+        const fetchResult = await fetchContentWithType(targetUrl);
+
+        // 如果是二进制流 (图片、音频、视频等媒体资源)，直接返回，保留完整的二进制结构
+        if (fetchResult.isBinary) {
+            logDebug(`二进制媒体/图片内容，直接流式返回: ${targetUrl}`);
+            const finalHeaders = new Headers(fetchResult.responseHeaders);
+            finalHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
+            finalHeaders.set("Access-Control-Allow-Origin", "*");
+            finalHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
+            finalHeaders.set("Access-Control-Allow-Headers", "*");
+            return new Response(fetchResult.response.body, {
+                status: 200,
+                headers: finalHeaders
+            });
+        }
+
+        const { content, contentType, responseHeaders } = fetchResult;
 
         // --- 写入缓存 (KV) ---
         if (kvNamespace) {

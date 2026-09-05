@@ -22,6 +22,9 @@ async function searchByAPIAndKeyWord(apiId, query) {
         const sep = hasQ ? '&' : (cleanBase.endsWith('/') ? '?' : '/?');
         apiUrl = `${cleanBase}${sep}ac=videolist&wd=${encodeURIComponent(query)}`;
         
+        // 记录请求发起时间，用于精确测速
+        const reqStartTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+
         // 添加超时处理
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -37,6 +40,10 @@ async function searchByAPIAndKeyWord(apiId, query) {
         });
         
         clearTimeout(timeoutId);
+        
+        // 计算响应延迟 (毫秒)
+        const reqEndTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+        const latency = Math.round(reqEndTime - reqStartTime);
         
         if (!response.ok) {
             return [];
@@ -72,6 +79,7 @@ async function searchByAPIAndKeyWord(apiId, query) {
                     ...item,
                     source_name: apiName,
                     source_code: apiId,
+                    source_latency: latency,
                     api_url: apiId.startsWith('custom_') ? getCustomApiInfo(apiId.replace('custom_', ''))?.url : undefined
                 });
             }
@@ -141,6 +149,7 @@ async function searchByAPIAndKeyWord(apiId, query) {
                                 ...item,
                                 source_name: apiName,
                                 source_code: apiId,
+                                source_latency: latency,
                                 api_url: apiId.startsWith('custom_') ? getCustomApiInfo(apiId.replace('custom_', ''))?.url : undefined
                             });
                             newAddedInPage++;
@@ -164,3 +173,191 @@ async function searchByAPIAndKeyWord(apiId, query) {
         return [];
     }
 }
+
+/**
+ * 影视名称文本清洗与归一化
+ */
+function normalizeTitle(str) {
+    if (!str) return '';
+    return str
+        .toLowerCase()
+        // 去除常见的各类括号及其内部的标签信息，如 [4K超清]、(国语版)、【全集】
+        .replace(/\[[^\]]*\]|\([^\)]*\)|【[^】]*】|（[^）]*）/g, '')
+        // 去除常见的清晰度、版别、集数修饰
+        .replace(/\b(4k|2160p|1080p|720p|hd|bd|tc|ts|hdr|h265|x264|中字|国语|粤语|完结|更新至\d+集|第[0-9一二三四五六七八九十]+[季部集])\b/gi, '')
+        // 去除特殊字符与标点空格
+        .replace(/[\s\-_:：·.,!！？?~_—/\\|]/g, '')
+        .trim();
+}
+
+/**
+ * 智能相关度匹配算法 (0 ~ 100 分)
+ * @param {string} rawQuery - 用户输入的搜索关键词
+ * @param {string} rawTitle - 视频标题
+ * @returns {number} 匹配度得分
+ */
+function calculateRelevance(rawQuery, rawTitle) {
+    if (!rawQuery || !rawTitle) return 0;
+    
+    const qClean = rawQuery.trim().toLowerCase().replace(/[\s\-_:：·.,!！？?~_—/\\|]/g, '');
+    const tClean = rawTitle.trim().toLowerCase().replace(/[\s\-_:：·.,!！？?~_—/\\|]/g, '');
+    
+    if (!qClean || !tClean) return 0;
+    
+    // 1. 绝对完全匹配
+    if (tClean === qClean) {
+        return 100;
+    }
+    
+    const normQ = normalizeTitle(rawQuery);
+    const normT = normalizeTitle(rawTitle);
+    
+    // 2. 清洗后的纯标题完全相等 (例如搜索 "择天记"，片名为 "择天记 [4K版]")
+    if (normQ && normT && normQ === normT) {
+        return 98;
+    }
+    
+    // 3. 前缀完全匹配 (例如 "择天记 第一季", "择天记动画版")
+    if (tClean.startsWith(qClean) || (normT && normQ && normT.startsWith(normQ))) {
+        const lenDiff = Math.abs(tClean.length - qClean.length);
+        return Math.max(85, 96 - lenDiff);
+    }
+    
+    // 4. 包含完整查询词 (例如 "剧版择天记", "新择天记")
+    if (tClean.includes(qClean) || (normT && normQ && normT.includes(normQ))) {
+        const lenDiff = Math.abs(tClean.length - qClean.length);
+        return Math.max(80, 92 - lenDiff * 2);
+    }
+    
+    // 5. 短关键词 (<= 2个字) 严格过滤：若不包含完整词，单字直接淘汰视为 0 分
+    // 避免搜 "庆" 出来所有带庆字的，搜 "唐探" 出来所有只带一个 "唐" 或 "探" 字的垃圾
+    if (qClean.length <= 2) {
+        return 0;
+    }
+    
+    // 6. 中长词 (>= 3个字)：检测最大连续公共子串与字符重合度
+    let maxSubstrLen = 0;
+    for (let len = qClean.length - 1; len >= 2; len--) {
+        for (let i = 0; i <= qClean.length - len; i++) {
+            const sub = qClean.substr(i, len);
+            if (tClean.includes(sub)) {
+                maxSubstrLen = Math.max(maxSubstrLen, len);
+                break;
+            }
+        }
+        if (maxSubstrLen > 0) break;
+    }
+    
+    // 统计字符命中数
+    let matchedChars = 0;
+    for (const char of qClean) {
+        if (tClean.includes(char)) {
+            matchedChars++;
+        }
+    }
+    const charRatio = matchedChars / qClean.length;
+    
+    // 要求：子串长度必须达到大半，且字符覆盖率必须很高 (>= 75%)
+    // 绝不允许单字拆分 (如 "择天记" 搜出 "老友记"、"记住这一天"、"妻不择食")
+    if (maxSubstrLen >= Math.ceil(qClean.length * 0.75) && charRatio >= 0.75) {
+        return Math.round(60 + charRatio * 15);
+    }
+    
+    // 其余单字、碎片孤立匹配直接给出极低分 (< 40)
+    return Math.round(charRatio * 30);
+}
+
+/**
+ * 视频画质与版本特征识别
+ * @param {Object} item - 视频数据项
+ * @returns {Object} 画质信息及加权分
+ */
+function detectVideoQuality(item) {
+    if (!item) return { tag: null, color: '', scoreBonus: 0, isHighQuality: false };
+    
+    const textPool = [
+        item.vod_remarks || '',
+        item.vod_name || '',
+        item.type_name || '',
+        item.source_name || ''
+    ].join(' ').toUpperCase();
+
+    // 1. 枪版 / 预告片 劣质标识（大幅降权）
+    if (/TC|TS|枪版|抢先版|韩版抢先|偷拍|录屏/i.test(textPool)) {
+        return {
+            tag: '抢先版',
+            color: 'bg-amber-600/90 text-white font-medium',
+            scoreBonus: -30,
+            isPoorQuality: true
+        };
+    }
+    if (/预告|片花|花絮/i.test(textPool) && !/正片/i.test(textPool)) {
+        return {
+            tag: '预告',
+            color: 'bg-red-600/90 text-white font-medium',
+            scoreBonus: -50,
+            isPoorQuality: true
+        };
+    }
+
+    // 2. 4K / 2160P 顶级画质（强力加分优先）
+    if (/4K|2160P|UHD|原盘|HDR|杜比|DOLBY/i.test(textPool)) {
+        return {
+            tag: '4K',
+            color: 'bg-gradient-to-r from-amber-500 to-yellow-400 text-black font-bold shadow-sm',
+            scoreBonus: 25,
+            isHighQuality: true
+        };
+    }
+
+    // 3. 1080P / 蓝光 / BD 超清画质
+    if (/1080P|蓝光|BD|超清|HD1080|1080/i.test(textPool)) {
+        return {
+            tag: '1080P',
+            color: 'bg-blue-600/90 text-white font-medium',
+            scoreBonus: 15,
+            isHighQuality: true
+        };
+    }
+
+    // 4. 720P / 高清 / HD
+    if (/720P|高清|HD/i.test(textPool)) {
+        return {
+            tag: 'HD',
+            color: 'bg-emerald-600/90 text-white',
+            scoreBonus: 5,
+            isHighQuality: false
+        };
+    }
+
+    // 默认无特殊画质标签
+    return {
+        tag: null,
+        color: '',
+        scoreBonus: 0,
+        isHighQuality: false
+    };
+}
+
+/**
+ * 格式化响应延迟徽章 HTML
+ * @param {number} latency - 毫秒延迟
+ * @returns {string} 徽章 HTML 字符串
+ */
+function formatLatencyBadge(latency) {
+    if (!latency || latency <= 0) return '';
+    if (latency < 600) {
+        return `<span class="inline-flex items-center text-[11px] font-medium text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded" title="响应延迟 ${latency}ms">⚡ ${latency}ms</span>`;
+    } else if (latency < 1500) {
+        return `<span class="inline-flex items-center text-[11px] font-medium text-yellow-400 bg-yellow-950/60 border border-yellow-500/30 px-1.5 py-0.5 rounded" title="响应延迟 ${latency}ms">⚡ ${latency}ms</span>`;
+    } else {
+        const sec = (latency / 1000).toFixed(1);
+        return `<span class="inline-flex items-center text-[11px] font-medium text-amber-400 bg-amber-950/60 border border-amber-500/30 px-1.5 py-0.5 rounded" title="响应延迟 ${latency}ms">⚡ ${sec}s</span>`;
+    }
+}
+
+// 暴露为全局函数供 app.js 与 player.js 使用
+window.normalizeTitle = normalizeTitle;
+window.calculateRelevance = calculateRelevance;
+window.detectVideoQuality = detectVideoQuality;
+window.formatLatencyBadge = formatLatencyBadge;

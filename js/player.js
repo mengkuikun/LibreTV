@@ -1623,13 +1623,18 @@ async function showSwitchResourceModal() {
         if (queryResult.length == 0) {
             return 
         }
-        // 优先取完全同名资源，否则默认取第一个
-        let result = queryResult[0]
-        queryResult.forEach((res) => {
-            if (res.vod_name == currentVideoTitle) {
-                result = res;
-            }
-        })
+        // 优先按匹配度与画质优选最契合的视频条目
+        if (queryResult.length > 1) {
+            queryResult.sort((a, b) => {
+                const relA = (typeof window.calculateRelevance === 'function') ? window.calculateRelevance(currentVideoTitle, a.vod_name) : 0;
+                const relB = (typeof window.calculateRelevance === 'function') ? window.calculateRelevance(currentVideoTitle, b.vod_name) : 0;
+                if (relB !== relA) return relB - relA;
+                const qA = (typeof window.detectVideoQuality === 'function') ? window.detectVideoQuality(a).scoreBonus : 0;
+                const qB = (typeof window.detectVideoQuality === 'function') ? window.detectVideoQuality(b).scoreBonus : 0;
+                return qB - qA;
+            });
+        }
+        let result = queryResult[0];
         allResults[opt.key] = result;
     }));
 

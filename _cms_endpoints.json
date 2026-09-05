@@ -1,104 +1,170 @@
 [
   {
-    "key": "hema",
-    "name": "河马｜短剧(JX)",
-    "api": "http://nm.4688888.xyz/vod/hema/hm.php/provide/vod/",
-    "type": 1
+    "key": "guangsu",
+    "name": "光速资源",
+    "api": "https://api.guangsuapi.com/api.php/provide/vod/",
+    "type": 1,
+    "category": "video",
+    "tag": "极速"
   },
   {
-    "key": "kuwo",
-    "name": "酷我｜音乐(JX)",
-    "api": "http://nm.4688888.xyz/vod/kuwo/kuwo.php/provide/vod/",
-    "type": 1
+    "key": "360zy",
+    "name": "360资源",
+    "api": "https://360zy.com/api.php/provide/vod",
+    "type": 1,
+    "category": "video",
+    "tag": "稳定"
   },
   {
-    "key": "kuwot",
-    "name": "酷我｜听书(JX)",
-    "api": "http://nm.4688888.xyz/vod/kuwo/kuwot.php/provide/vod/",
-    "type": 1
+    "key": "modu",
+    "name": "魔都资源",
+    "api": "https://caiji.moduapi.cc/api.php/provide/vod/",
+    "type": 1,
+    "category": "video",
+    "tag": "丰富"
   },
   {
-    "key": "kuwot",
-    "name": "酷我｜听书(JX)",
-    "api": "http://nm.4688888.xyz/vod/kuwo/kuwotdm.php/provide/vod/",
-    "type": 4
+    "key": "huya",
+    "name": "虎牙采集",
+    "api": "https://www.huyaapi.com/api.php/provide/vod/",
+    "type": 1,
+    "category": "video",
+    "tag": "备用"
   },
   {
-    "key": "kuwo",
-    "name": "酷我｜音乐(JX)",
-    "api": "http://nm.4688888.xyz/vod/kuwo/kwdm.php/provide/vod/",
-    "type": 4
+    "key": "bfzy",
+    "name": "暴风资源",
+    "api": "https://bfzyapi.com/api.php/provide/vod",
+    "type": 1,
+    "category": "video",
+    "tag": "影视"
   },
   {
-    "key": "qqmusic",
-    "name": "秋秋｜音乐(JX)",
-    "api": "http://nm.4688888.xyz/vod/qqmusic.php/provide/vod/",
-    "type": 4
+    "key": "lzzy",
+    "name": "量子资源",
+    "api": "http://cj.lziapi.com/api.php/provide/vod/",
+    "type": 1,
+    "category": "video",
+    "tag": "影视"
   },
   {
-    "key": "qqmusic",
-    "name": "秋秋｜音乐(JX)",
-    "api": "http://nm.4688888.xyz/vod/qqmusicdm.php/provide/vod/",
-    "type": 4
+    "key": "ffzy",
+    "name": "非凡资源",
+    "api": "http://cj.ffzyapi.com/api.php/provide/vod/",
+    "type": 1,
+    "category": "video",
+    "tag": "影视"
   },
   {
-    "key": "xmly",
-    "name": "喜马拉雅｜听书(JX)",
-    "api": "http://nm.4688888.xyz/vod/xmly_a.php/provide/vod/",
-    "type": 1
+    "key": "hhzy",
+    "name": "豪华资源",
+    "api": "https://hhzyapi.com/api.php/provide/vod/",
+    "type": 1,
+    "category": "video",
+    "tag": "影视"
   },
   {
-    "key": "yd",
-    "name": "移动｜4K(JX)",
-    "api": "https://nm.4688888.xyz/vod/138.php/provide/vod/",
-    "type": 1
+    "key": "wujin",
+    "name": "无尽资源网",
+    "api": "https://api.wujinapi.me/api.php/provide/vod/from/wjm3u8/",
+    "type": 1,
+    "category": "video",
+    "tag": "影视"
+  },
+  {
+    "key": "jin_ying",
+    "name": "金鹰资源",
+    "api": "https://jyzyapi.com/provide/vod",
+    "type": 1,
+    "category": "video",
+    "tag": "影视"
   },
   {
     "key": "acfun",
     "name": "A站｜4K(JX)",
     "api": "https://nm.4688888.xyz/vod/acfun.php/provide/vod/",
-    "type": 1
+    "type": 1,
+    "category": "video",
+    "tag": "4K"
   },
   {
-    "key": "yd1",
-    "name": "移动①｜4K(JX)",
-    "api": "https://nm.4688888.xyz/vod/bix.php/provide/vod/",
-    "type": 1
-  },
-  {
-    "key": "gz",
-    "name": "洽洽｜替换(JX)",
-    "api": "https://nm.4688888.xyz/vod/gzys.php/provide/vod",
-    "type": 1
-  },
-  {
-    "key": "京城",
-    "name": "京城｜1K",
-    "api": "https://nm.4688888.xyz/vod/jc.php/provide/vod/",
-    "type": 1
-  },
-  {
-    "key": "薯片",
+    "key": "shupian",
     "name": "乐视｜1K(JX)",
     "api": "https://nm.4688888.xyz/vod/ls.php/provide/vod/",
-    "type": 1
-  },
-  {
-    "key": "咪咕",
-    "name": "咪咕｜音乐(JX)",
-    "api": "https://nm.4688888.xyz/vod/migu.php/provide/vod",
-    "type": 1
+    "type": 1,
+    "category": "video",
+    "tag": "1080P"
   },
   {
     "key": "rr",
     "name": "人人｜4K(JX)",
     "api": "https://nm.4688888.xyz/vod/rr.php/provide/vod/",
-    "type": 1
+    "type": 1,
+    "category": "video",
+    "tag": "4K"
+  },
+  {
+    "key": "hema",
+    "name": "河马｜短剧(JX)",
+    "api": "http://nm.4688888.xyz/vod/hema/hm.php/provide/vod/",
+    "type": 1,
+    "category": "short",
+    "tag": "短剧"
+  },
+  {
+    "key": "kuwo",
+    "name": "酷我｜音乐(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kuwo.php/provide/vod/",
+    "type": 1,
+    "category": "music",
+    "tag": "音乐"
+  },
+  {
+    "key": "kuwot",
+    "name": "酷我｜听书(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kuwot.php/provide/vod/",
+    "type": 1,
+    "category": "music",
+    "tag": "听书"
+  },
+  {
+    "key": "kuwot_dm",
+    "name": "酷我｜听书-DM(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kuwotdm.php/provide/vod/",
+    "type": 4,
+    "category": "music",
+    "tag": "听书"
+  },
+  {
+    "key": "kuwo_dm",
+    "name": "酷我｜音乐-DM(JX)",
+    "api": "http://nm.4688888.xyz/vod/kuwo/kwdm.php/provide/vod/",
+    "type": 4,
+    "category": "music",
+    "tag": "音乐"
+  },
+  {
+    "key": "qqmusic",
+    "name": "秋秋｜音乐(JX)",
+    "api": "http://nm.4688888.xyz/vod/qqmusic.php/provide/vod/",
+    "type": 4,
+    "category": "music",
+    "tag": "音乐"
+  },
+  {
+    "key": "qqmusic_dm",
+    "name": "秋秋｜音乐-DM(JX)",
+    "api": "http://nm.4688888.xyz/vod/qqmusicdm.php/provide/vod/",
+    "type": 4,
+    "category": "music",
+    "tag": "音乐"
   },
   {
     "key": "wyy",
     "name": "网易云｜音乐(JX)",
     "api": "https://nm.4688888.xyz/vod/wyy.php/provide/vod",
-    "type": 1
+    "type": 1,
+    "category": "music",
+    "tag": "音乐"
   }
 ]

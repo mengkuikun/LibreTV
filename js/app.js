@@ -18,22 +18,11 @@ let currentEpisodeNames = [];
 let currentParsedTvboxSites = [];
 
 document.addEventListener('DOMContentLoaded', function () {
-    // 初始化API复选框
-    initAPICheckboxes();
-
-    // 初始化自定义API列表
-    renderCustomAPIsList();
-
-    // 初始化显示选中的API数量
-    updateSelectedApiCount();
-
-    // 渲染搜索历史
-    renderSearchHistory();
-
-    // 设置默认API选择（如果是第一次加载）
-    if (!localStorage.getItem('hasInitializedDefaults')) {
-        // 默认选中资源
-        selectedAPIs = ["wujin"];
+    // 校验并清理已移除的旧内置源，保证默认选中有效优质源
+    const validSelected = selectedAPIs.filter(k => API_SITES[k] || k.startsWith('custom_'));
+    if (!localStorage.getItem('hasInitializedDefaults') || validSelected.length === 0) {
+        // 默认选中优质极速资源
+        selectedAPIs = ["guangsu", "360zy", "wujin", "bfzy"].filter(k => API_SITES[k]);
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
 
         // 默认选中过滤开关
@@ -45,7 +34,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // 标记已初始化默认值
         localStorage.setItem('hasInitializedDefaults', 'true');
+    } else if (validSelected.length !== selectedAPIs.length) {
+        selectedAPIs = validSelected;
+        localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
     }
+
+    // 初始化API复选框
+    initAPICheckboxes();
+
+    // 初始化自定义API列表
+    renderCustomAPIsList();
+
+    // 初始化显示选中的API数量
+    updateSelectedApiCount();
+
+    // 渲染搜索历史
+    renderSearchHistory();
 
     // 设置黄色内容过滤器开关初始状态
     const yellowFilterToggle = document.getElementById('yellowFilterToggle');
@@ -66,45 +70,63 @@ document.addEventListener('DOMContentLoaded', function () {
     setTimeout(checkAdultAPIsSelected, 100);
 });
 
-// 初始化API复选框
+// 初始化API复选框（按影视、短剧、音乐听书分类，100% 保持原站风格）
 function initAPICheckboxes() {
     const container = document.getElementById('apiCheckboxes');
+    if (!container) return;
     container.innerHTML = '';
 
-    // 添加普通API组标题
-    const normaldiv = document.createElement('div');
-    normaldiv.id = 'normaldiv';
-    normaldiv.className = 'grid grid-cols-2 gap-2';
-    const normalTitle = document.createElement('div');
-    normalTitle.className = 'api-group-title';
-    normalTitle.textContent = '普通资源';
-    normaldiv.appendChild(normalTitle);
+    const categories = [
+        { key: 'video', name: '普通影视' },
+        { key: 'short', name: '短剧资源' },
+        { key: 'music', name: '音乐与听书' }
+    ];
 
-    // 创建普通API源的复选框
-    Object.keys(API_SITES).forEach(apiKey => {
-        const api = API_SITES[apiKey];
-        if (api.adult) return; // 跳过成人内容API，稍后添加
-
-        const checked = selectedAPIs.includes(apiKey);
-
-        const checkbox = document.createElement('div');
-        checkbox.className = 'flex items-center';
-        checkbox.innerHTML = `
-            <input type="checkbox" id="api_${apiKey}" 
-                   class="form-checkbox h-3 w-3 text-blue-600 bg-[#222] border border-[#333]" 
-                   ${checked ? 'checked' : ''} 
-                   data-api="${apiKey}">
-            <label for="api_${apiKey}" class="ml-1 text-xs text-gray-400 truncate">${api.name}</label>
-        `;
-        normaldiv.appendChild(checkbox);
-
-        // 添加事件监听器
-        checkbox.querySelector('input').addEventListener('change', function () {
-            updateSelectedAPIs();
-            checkAdultAPIsSelected();
+    categories.forEach((cat, index) => {
+        const siteKeys = Object.keys(API_SITES).filter(k => {
+            const api = API_SITES[k];
+            if (api.adult) return false;
+            if (cat.key === 'video') return api.category === 'video' || (!api.category && !api.name.includes('音乐') && !api.name.includes('听书') && !api.name.includes('短剧'));
+            if (cat.key === 'short') return api.category === 'short' || (!api.category && api.name.includes('短剧'));
+            if (cat.key === 'music') return api.category === 'music' || (!api.category && (api.name.includes('音乐') || api.name.includes('听书')));
+            return false;
         });
+
+        if (siteKeys.length === 0) return;
+
+        const groupDiv = document.createElement('div');
+        groupDiv.id = `group_${cat.key}`;
+        groupDiv.className = 'grid grid-cols-2 gap-2 mb-2';
+
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'api-group-title';
+        titleDiv.textContent = cat.name;
+        groupDiv.appendChild(titleDiv);
+
+        siteKeys.forEach(apiKey => {
+            const api = API_SITES[apiKey];
+            const checked = selectedAPIs.includes(apiKey);
+
+            const checkbox = document.createElement('div');
+            checkbox.className = 'flex items-center';
+            checkbox.innerHTML = `
+                <input type="checkbox" id="api_${apiKey}" 
+                       class="form-checkbox h-3 w-3 text-blue-600 bg-[#222] border border-[#333]" 
+                       ${checked ? 'checked' : ''} 
+                       data-api="${apiKey}"
+                       data-category="${cat.key}">
+                <label for="api_${apiKey}" class="ml-1 text-xs text-gray-400 truncate cursor-pointer" title="${api.name}">${api.name}</label>
+            `;
+            groupDiv.appendChild(checkbox);
+
+            checkbox.querySelector('input').addEventListener('change', function () {
+                updateSelectedAPIs();
+                checkAdultAPIsSelected();
+            });
+        });
+
+        container.appendChild(groupDiv);
     });
-    container.appendChild(normaldiv);
 
     // 添加成人API列表
     addAdultAPI();
@@ -113,16 +135,19 @@ function initAPICheckboxes() {
     checkAdultAPIsSelected();
 }
 
-// 添加成人API列表
+// 添加成人API列表 (100% 保持原站样式与 SVG 图标)
 function addAdultAPI() {
-    // 仅在隐藏设置为false时添加成人API组
     if (!HIDE_BUILTIN_ADULT_APIS && (localStorage.getItem('yellowFilterEnabled') === 'false')) {
         const container = document.getElementById('apiCheckboxes');
+        if (!container) return;
 
-        // 添加成人API组标题
+        const adultKeys = Object.keys(API_SITES).filter(k => API_SITES[k].adult);
+        if (adultKeys.length === 0) return;
+
         const adultdiv = document.createElement('div');
         adultdiv.id = 'adultdiv';
-        adultdiv.className = 'grid grid-cols-2 gap-2';
+        adultdiv.className = 'grid grid-cols-2 gap-2 mb-2';
+
         const adultTitle = document.createElement('div');
         adultTitle.className = 'api-group-title adult';
         adultTitle.innerHTML = `黄色资源采集站 <span class="adult-warning">
@@ -132,11 +157,8 @@ function addAdultAPI() {
         </span>`;
         adultdiv.appendChild(adultTitle);
 
-        // 创建成人API源的复选框
-        Object.keys(API_SITES).forEach(apiKey => {
+        adultKeys.forEach(apiKey => {
             const api = API_SITES[apiKey];
-            if (!api.adult) return; // 仅添加成人内容API
-
             const checked = selectedAPIs.includes(apiKey);
 
             const checkbox = document.createElement('div');
@@ -145,17 +167,18 @@ function addAdultAPI() {
                 <input type="checkbox" id="api_${apiKey}" 
                        class="form-checkbox h-3 w-3 text-blue-600 bg-[#222] border border-[#333] api-adult" 
                        ${checked ? 'checked' : ''} 
-                       data-api="${apiKey}">
-                <label for="api_${apiKey}" class="ml-1 text-xs text-pink-400 truncate">${api.name}</label>
+                       data-api="${apiKey}"
+                       data-category="adult">
+                <label for="api_${apiKey}" class="ml-1 text-xs text-pink-400 truncate cursor-pointer" title="${api.name}">${api.name}</label>
             `;
             adultdiv.appendChild(checkbox);
 
-            // 添加事件监听器
             checkbox.querySelector('input').addEventListener('change', function () {
                 updateSelectedAPIs();
                 checkAdultAPIsSelected();
             });
         });
+
         container.appendChild(adultdiv);
     }
 }
@@ -366,15 +389,32 @@ function updateSelectedApiCount() {
     }
 }
 
-// 全选或取消全选API
-function selectAllAPIs(selectAll = true, excludeAdult = false) {
+// 全选或取消全选API，支持按分类选择: filterType = 'video' | 'music' | 'short' | 'all' | 'normal'
+function selectAllAPIs(selectAll = true, filterType = 'all') {
     const checkboxes = document.querySelectorAll('#apiCheckboxes input[type="checkbox"]');
 
     checkboxes.forEach(checkbox => {
-        if (excludeAdult && checkbox.classList.contains('api-adult')) {
+        const cat = checkbox.getAttribute('data-category') || 'video';
+        const isAdult = checkbox.classList.contains('api-adult') || cat === 'adult';
+
+        if (!selectAll) {
             checkbox.checked = false;
+            return;
+        }
+
+        if (filterType === true || filterType === 'normal') {
+            checkbox.checked = !isAdult;
+            return;
+        }
+
+        if (filterType === 'video') {
+            checkbox.checked = (cat === 'video' || cat === 'short') && !isAdult;
+        } else if (filterType === 'music') {
+            checkbox.checked = (cat === 'music');
+        } else if (filterType === 'short') {
+            checkbox.checked = (cat === 'short');
         } else {
-            checkbox.checked = selectAll;
+            checkbox.checked = true;
         }
     });
 
@@ -608,7 +648,6 @@ function getCustomApiInfo(customApiIndex) {
     return customAPIs[index];
 }
 
-// 搜索功能 - 修改为支持多选API和多页结果
 async function search() {
     // 强化的密码保护校验 - 防止绕过
     try {
@@ -671,14 +710,65 @@ async function search() {
             }
         });
 
-        // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
+        // 处理搜索结果过滤：如果启用了黄色内容过滤，则过滤掉分类含有敏感内容的项目
+        const yellowFilterEnabled = localStorage.getItem('yellowFilterEnabled') === 'true';
+        if (yellowFilterEnabled) {
+            const banned = ['伦理片', '福利', '里番动漫', '门事件', '萝莉少女', '制服诱惑', '国产传媒', 'cosplay', '黑丝诱惑', '无码', '日本无码', '有码', '日本有码', 'SWAG', '网红主播', '色情片', '同性片', '福利视频', '福利片'];
+            allResults = allResults.filter(item => {
+                const typeName = item.type_name || '';
+                return !banned.some(keyword => typeName.includes(keyword));
+            });
+        }
+
+        // 计算匹配度相关性、画质等级、延迟与智能综合评分
+        const cleanQuery = query.trim();
+        allResults.forEach(item => {
+            const relevance = (typeof window.calculateRelevance === 'function')
+                ? window.calculateRelevance(cleanQuery, item.vod_name)
+                : 100;
+            const quality = (typeof window.detectVideoQuality === 'function')
+                ? window.detectVideoQuality(item)
+                : { tag: null, color: '', scoreBonus: 0 };
+            const latency = item.source_latency || 800;
+
+            // 长度精准度惩罚：片名越贴近原名越靠前（避免冗长解说/衍生片霸屏）
+            const qLen = cleanQuery.replace(/[\s\-_]/g, '').length;
+            const tLen = (item.vod_name || '').trim().replace(/[\s\-_]/g, '').length;
+            const lenDiff = Math.abs(tLen - qLen);
+            const lengthPenalty = Math.min(lenDiff * 1.5, 20);
+
+            // 延迟惩罚：延迟 300ms 扣 3分，1500ms 扣 15分（上限 20分）
+            const latencyPenalty = Math.min(latency / 100, 20);
+
+            item.relevanceScore = relevance;
+            item.qualityInfo = quality;
+            // 综合打分：匹配度占主导 (10倍权重)，4K/1080P 高画质优先加成，低延迟优先，枪版/预告片大幅降权
+            item.totalScore = (relevance * 10) + (quality.scoreBonus || 0) - lengthPenalty - latencyPenalty;
+        });
+
+        // 过滤无关噪音：剔除匹配度 < 60 分的单字孤立项（彻底杜绝搜“择天记”出现“老友记”、“记住这一天”等垃圾结果）
+        let filteredResults = allResults.filter(item => (item.relevanceScore || 0) >= 60);
+
+        // 安全兜底保护：若严格过滤后无结果，但原列表存在部分重合项，则放宽回退，避免生僻词误杀
+        if (filteredResults.length === 0 && allResults.length > 0) {
+            const partialResults = allResults.filter(item => (item.relevanceScore || 0) > 0);
+            filteredResults = partialResults.length > 0 ? partialResults : allResults;
+        }
+        allResults = filteredResults;
+
+        // 对搜索结果进行智能排序：优先按综合得分降序（高匹配度、4K/超清高画质、低延迟排在最前）
         allResults.sort((a, b) => {
-            // 首先按照视频名称排序
-            const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
-            if (nameCompare !== 0) return nameCompare;
-            
-            // 如果名称相同，则按照来源排序
-            return (a.source_name || '').localeCompare(b.source_name || '');
+            if (b.totalScore !== a.totalScore) {
+                return b.totalScore - a.totalScore;
+            }
+            // 综合得分相同时，响应速度更快的源排在前面
+            const latA = a.source_latency || 9999;
+            const latB = b.source_latency || 9999;
+            if (latA !== latB) {
+                return latA - latB;
+            }
+            // 仍然相同时按照片名升序
+            return (a.vod_name || '').localeCompare(b.vod_name || '');
         });
 
         // 更新搜索结果计数
@@ -733,16 +823,6 @@ async function search() {
             // 如果更新URL失败，继续执行搜索
         }
 
-        // 处理搜索结果过滤：如果启用了黄色内容过滤，则过滤掉分类含有敏感内容的项目
-        const yellowFilterEnabled = localStorage.getItem('yellowFilterEnabled') === 'true';
-        if (yellowFilterEnabled) {
-            const banned = ['伦理片', '福利', '里番动漫', '门事件', '萝莉少女', '制服诱惑', '国产传媒', 'cosplay', '黑丝诱惑', '无码', '日本无码', '有码', '日本有码', 'SWAG', '网红主播', '色情片', '同性片', '福利视频', '福利片'];
-            allResults = allResults.filter(item => {
-                const typeName = item.type_name || '';
-                return !banned.some(keyword => typeName.includes(keyword));
-            });
-        }
-
         // 添加XSS保护，使用textContent和属性转义
         const safeResults = allResults.map(item => {
             const safeId = item.vod_id ? item.vod_id.toString().replace(/[^\w-]/g, '') : '';
@@ -760,6 +840,10 @@ async function search() {
 
             // 修改为水平卡片布局，图片在左侧，文本在右侧，并优化样式
             const hasCover = item.vod_pic && item.vod_pic.startsWith('http');
+            const qualityTagHtml = (item.qualityInfo && item.qualityInfo.tag) ?
+                `<span class="px-1.5 py-0.5 rounded text-[10px] ${item.qualityInfo.color}">${item.qualityInfo.tag}</span>` : '';
+            const latencyBadgeHtml = (typeof window.formatLatencyBadge === 'function') ?
+                window.formatLatencyBadge(item.source_latency) : '';
 
             return `
                 <div class="card-hover bg-[#111] rounded-lg overflow-hidden cursor-pointer transition-all hover:scale-[1.02] h-full shadow-sm hover:shadow-md" 
@@ -772,11 +856,18 @@ async function search() {
                                  onerror="this.onerror=null; this.src='https://via.placeholder.com/300x450?text=无封面'; this.classList.add('object-contain');" 
                                  loading="lazy">
                             <div class="absolute inset-0 bg-gradient-to-r from-black/30 to-transparent"></div>
+                            ${qualityTagHtml ? `
+                            <div class="absolute top-1.5 left-1.5 z-10">
+                                ${qualityTagHtml}
+                            </div>` : ''}
                         </div>` : ''}
                         
                         <div class="p-2 flex flex-col flex-grow">
                             <div class="flex-grow">
-                                <h3 class="font-semibold mb-2 break-words line-clamp-2 ${hasCover ? '' : 'text-center'}" title="${safeName}">${safeName}</h3>
+                                <div class="flex items-start justify-between gap-1 mb-1.5">
+                                    <h3 class="font-semibold break-words line-clamp-2 ${hasCover ? '' : 'text-center flex-grow'}" title="${safeName}">${safeName}</h3>
+                                    ${!hasCover && qualityTagHtml ? `<div class="flex-shrink-0">${qualityTagHtml}</div>` : ''}
+                                </div>
                                 
                                 <div class="flex flex-wrap ${hasCover ? '' : 'justify-center'} gap-1 mb-2">
                                     ${(item.type_name || '').toString().replace(/</g, '&lt;') ?
@@ -795,16 +886,7 @@ async function search() {
                             
                             <div class="flex justify-between items-center mt-1 pt-1 border-t border-gray-800">
                                 ${sourceInfo ? `<div>${sourceInfo}</div>` : '<div></div>'}
-                                <!-- 接口名称过长会被挤变形
-                                <div>
-                                    <span class="text-gray-500 flex items-center hover:text-blue-400 transition-colors">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                        </svg>
-                                        播放
-                                    </span>
-                                </div>
-                                -->
+                                <div>${latencyBadgeHtml}</div>
                             </div>
                         </div>
                     </div>
@@ -1193,21 +1275,6 @@ function handlePlayerError() {
     showToast('视频播放加载失败，请尝试其他视频源', 'error');
 }
 
-// 辅助函数用于渲染剧集按钮（使用当前的排序状态）
-function renderEpisodes(vodName, sourceCode, vodId) {
-    const episodes = episodesReversed ? [...currentEpisodes].reverse() : currentEpisodes;
-    return episodes.map((episode, index) => {
-        // 根据倒序状态计算真实的剧集索引
-        const realIndex = episodesReversed ? currentEpisodes.length - 1 - index : index;
-        return `
-            <button id="episode-${realIndex}" onclick="playVideo('${episode}','${vodName.replace(/"/g, '&quot;')}', '${sourceCode}', ${realIndex}, '${vodId}')" 
-                    class="px-4 py-2 bg-[#222] hover:bg-[#333] border border-[#333] rounded-lg transition-colors text-center episode-btn">
-                ${realIndex + 1}
-            </button>
-        `;
-    }).join('');
-}
-
 // 复制视频链接到剪贴板
 function copyLinks() {
     const episodes = episodesReversed ? [...currentEpisodes].reverse() : currentEpisodes;
@@ -1547,7 +1614,7 @@ async function parseTvboxFromUrl(targetUrlOverride) {
                     <option value="${encodeURIComponent(w.url)}">${w.name || ('线路 ' + (idx + 1))}</option>
                 `).join('');
             }
-            showTvboxStatus(`🎉 解析成功！检测到多仓聚合（包含 ${result.warehouses.length} 条线路），请在下方下拉菜单中选择线路载入源。`, 'success');
+            showTvboxStatus(`解析成功！检测到多仓聚合（包含 ${result.warehouses.length} 条线路），请在下方下拉菜单中选择线路载入源。`, 'success');
             // 默认自动拉取第一条线路
             if (result.warehouses.length > 0 && !targetUrlOverride) {
                 loadSelectedWarehouseLine();
@@ -1649,12 +1716,16 @@ function loadBuiltinTvboxSites(presetType = 'default') {
         let sites = [];
         if (presetType === 'mainstream') {
             sites = [
+                { key: 'guangsu', name: '光速资源', api: 'https://api.guangsuapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '极速4K影视源' },
+                { key: '360zy', name: '360资源', api: 'https://360zy.com/api.php/provide/vod', type: 1, compatible: true, reason: '稳定主流影视源' },
+                { key: 'modu', name: '魔都资源', api: 'https://caiji.moduapi.cc/api.php/provide/vod/', type: 1, compatible: true, reason: '丰富主流影视源' },
+                { key: 'huya', name: '虎牙采集', api: 'https://www.huyaapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '备用影视源' },
                 { key: 'bfzy', name: '暴风资源', api: 'https://bfzyapi.com/api.php/provide/vod', type: 1, compatible: true, reason: '主流影视源' },
                 { key: 'lzzy', name: '量子资源', api: 'http://cj.lziapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
                 { key: 'ffzy', name: '非凡资源', api: 'http://cj.ffzyapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
-                { key: 'snzy', name: '索尼资源', api: 'https://suoniapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
                 { key: 'hhzy', name: '豪华资源', api: 'https://hhzyapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' },
-                { key: 'kczy', name: '快车资源', api: 'https://caiji.kczyapi.com/api.php/provide/vod/', type: 1, compatible: true, reason: '主流影视源' }
+                { key: 'wujin', name: '无尽资源网', api: 'https://api.wujinapi.me/api.php/provide/vod/from/wjm3u8/', type: 1, compatible: true, reason: '主流影视源' },
+                { key: 'jin_ying', name: '金鹰资源', api: 'https://jyzyapi.com/provide/vod', type: 1, compatible: true, reason: '主流影视源' }
             ];
         } else {
             const rawMap = window.BUILTIN_CUSTOMER_SITES || {};
@@ -1664,7 +1735,7 @@ function loadBuiltinTvboxSites(presetType = 'default') {
                 api: rawMap[k].api,
                 type: rawMap[k].type || 1,
                 compatible: true,
-                reason: '精选 17 源'
+                reason: rawMap[k].category === 'music' ? '精选音乐听书源' : (rawMap[k].category === 'short' ? '精选短剧源' : '精选影视源')
             }));
         }
 
@@ -1713,10 +1784,10 @@ function renderTvboxSitesPreview(result) {
                     </p>
                     <div class="flex justify-center space-x-2">
                         <button onclick="loadBuiltinTvboxSites('default')" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition-colors">
-                            ⚡ 一键载入 17 个全能精选源
+                            一键载入 21 个全能精选源
                         </button>
                         <button onclick="loadBuiltinTvboxSites('mainstream')" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition-colors">
-                            🎬 一键载入主流影视仓
+                            一键载入主流影视仓
                         </button>
                     </div>
                 </div>
