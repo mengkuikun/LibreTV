@@ -1606,37 +1606,100 @@ async function showSwitchResourceModal() {
     modalContent.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;grid-column:1/-1;">正在加载资源列表...</div>';
     modal.classList.remove('hidden');
 
-    // 搜索
-    const resourceOptions = selectedAPIs.map((curr) => {
+    // 搜索：聚合已选内置源与全部可用自定义源
+    const seenKeys = new Set();
+    const resourceOptions = [];
+    
+    // 判断当前播放的是否为音乐源
+    const isCurrentMusic = currentSourceCode && API_SITES[currentSourceCode]?.category === 'music';
+    
+    // 1. 扫描已选中的源
+    const apisToScan = (selectedAPIs && selectedAPIs.length > 0) 
+        ? selectedAPIs 
+        : ["guangsu", "360zy", "wujin", "bfzy", "lzzy", "ffzy", "hhzy"].filter(k => API_SITES[k]);
+
+    apisToScan.forEach((curr) => {
+        if (seenKeys.has(curr)) return;
+        seenKeys.add(curr);
         if (API_SITES[curr]) {
-            return { key: curr, name: API_SITES[curr].name };
+            const api = API_SITES[curr];
+            // 播放影视剧时排除纯音乐源和成人测试源；播放音乐时只保留音乐源
+            if (!isCurrentMusic && api.category === 'music') return;
+            if (isCurrentMusic && api.category !== 'music') return;
+            if (api.adult || curr === 'testSource') return;
+            resourceOptions.push({ key: curr, name: api.name, isCustom: false });
+        } else if (curr.startsWith('custom_')) {
+            const customIndex = parseInt(curr.replace('custom_', ''), 10);
+            if (customAPIs[customIndex]) {
+                resourceOptions.push({ 
+                    key: curr, 
+                    name: customAPIs[customIndex].name || '自定义资源', 
+                    isCustom: true 
+                });
+            }
         }
-        const customIndex = parseInt(curr.replace('custom_', ''), 10);
-        if (customAPIs[customIndex]) {
-            return { key: curr, name: customAPIs[customIndex].name || '自定义资源' };
-        }
-        return { key: curr, name: '未知资源' };
     });
+
+    // 2. 自动补齐所有尚未在 selectedAPIs 中勾选但已存在的自定义源
+    customAPIs.forEach((api, index) => {
+        const key = 'custom_' + index;
+        if (!seenKeys.has(key) && api && api.url) {
+            seenKeys.add(key);
+            resourceOptions.push({ 
+                key: key, 
+                name: api.name || `自定义源 ${index + 1}`, 
+                isCustom: true 
+            });
+        }
+    });
+
     let allResults = {};
     await Promise.all(resourceOptions.map(async (opt) => {
         let queryResult = await searchByAPIAndKeyWord(opt.key, currentVideoTitle);
-        if (queryResult.length == 0) {
-            return 
+        if (!queryResult || queryResult.length === 0) {
+            return;
         }
+
+        // 严格相关度硬性截断：剔除低于 60 分的单字/无关噪音（彻底杜绝搜《择天记》返回《重回选择嫁谁的那天》等噪音短剧）
+        const validCandidates = queryResult.filter(item => {
+            if (!item || !item.vod_name) return false;
+            const rel = (typeof window.calculateRelevance === 'function')
+                ? window.calculateRelevance(currentVideoTitle, item.vod_name)
+                : 50;
+            return rel >= 60;
+        });
+
+        if (validCandidates.length === 0) {
+            return;
+        }
+
         // 优先按匹配度与画质优选最契合的视频条目
-        if (queryResult.length > 1) {
-            queryResult.sort((a, b) => {
-                const relA = (typeof window.calculateRelevance === 'function') ? window.calculateRelevance(currentVideoTitle, a.vod_name) : 0;
-                const relB = (typeof window.calculateRelevance === 'function') ? window.calculateRelevance(currentVideoTitle, b.vod_name) : 0;
-                if (relB !== relA) return relB - relA;
-                const qA = (typeof window.detectVideoQuality === 'function') ? window.detectVideoQuality(a).scoreBonus : 0;
-                const qB = (typeof window.detectVideoQuality === 'function') ? window.detectVideoQuality(b).scoreBonus : 0;
-                return qB - qA;
-            });
-        }
-        let result = queryResult[0];
-        allResults[opt.key] = result;
+        validCandidates.sort((a, b) => {
+            const relA = (typeof window.calculateRelevance === 'function') ? window.calculateRelevance(currentVideoTitle, a.vod_name) : 0;
+            const relB = (typeof window.calculateRelevance === 'function') ? window.calculateRelevance(currentVideoTitle, b.vod_name) : 0;
+            if (relB !== relA) return relB - relA;
+            const qA = (typeof window.detectVideoQuality === 'function') ? window.detectVideoQuality(a).scoreBonus : 0;
+            const qB = (typeof window.detectVideoQuality === 'function') ? window.detectVideoQuality(b).scoreBonus : 0;
+            return qB - qA;
+        });
+
+        const bestItem = validCandidates[0];
+        const relScore = (typeof window.calculateRelevance === 'function')
+            ? window.calculateRelevance(currentVideoTitle, bestItem.vod_name)
+            : 80;
+
+        allResults[opt.key] = {
+            ...bestItem,
+            relevanceScore: relScore,
+            isCustom: opt.isCustom
+        };
     }));
+
+    // 若无匹配资源
+    if (Object.keys(allResults).length === 0) {
+        modalContent.innerHTML = '<div style="text-align:center;padding:30px;color:#888;grid-column:1/-1;">未在其他数据源中检索到匹配视频</div>';
+        return;
+    }
 
     // 更新状态显示：开始速率测试
     modalContent.innerHTML = '<div style="text-align:center;padding:20px;color:#aaa;grid-column:1/-1;">正在测试各资源速率...</div>';
@@ -1649,7 +1712,10 @@ async function showSwitchResourceModal() {
         }
     }));
 
-    // 对结果进行排序
+    // 对结果进行综合多维排序：
+    // 1. 当前播放的源置顶
+    // 2. 标题匹配度优先 (完全匹配/高契合度优先)
+    // 3. 同等或接近相关度下，低延迟极速优先
     const sortedResults = Object.entries(allResults).sort(([keyA, resultA], [keyB, resultB]) => {
         // 当前播放的源放在最前面
         const isCurrentA = String(keyA) === String(currentSourceCode) && String(resultA.vod_id) === String(currentVideoId);
@@ -1658,6 +1724,12 @@ async function showSwitchResourceModal() {
         if (isCurrentA && !isCurrentB) return -1;
         if (!isCurrentA && isCurrentB) return 1;
         
+        // 匹配度权重优先 (相关度相差15分以上，优先匹配度高的)
+        const relDiff = (resultB.relevanceScore || 0) - (resultA.relevanceScore || 0);
+        if (Math.abs(relDiff) >= 15) {
+            return relDiff;
+        }
+
         // 其余按照速度排序，速度快的在前面（速度为-1表示失败，排到最后）
         const speedA = speedResults[keyA]?.speed || 99999;
         const speedB = speedResults[keyB]?.speed || 99999;
@@ -1666,7 +1738,11 @@ async function showSwitchResourceModal() {
         if (speedA !== -1 && speedB === -1) return -1;
         if (speedA === -1 && speedB === -1) return 0;
         
-        return speedA - speedB;
+        if (speedA !== speedB) {
+            return speedA - speedB;
+        }
+
+        return relDiff;
     });
 
     // 渲染资源列表
@@ -1679,6 +1755,8 @@ async function showSwitchResourceModal() {
         const isCurrentSource = String(sourceKey) === String(currentSourceCode) && String(result.vod_id) === String(currentVideoId);
         const sourceName = resourceOptions.find(opt => opt.key === sourceKey)?.name || '未知资源';
         const speedResult = speedResults[sourceKey] || { speed: -1, error: '未测试' };
+        const isCustom = result.isCustom || sourceKey.startsWith('custom_');
+        const customBadge = isCustom ? '<span class="ml-1 px-1 py-0.5 text-[9px] bg-emerald-900 text-emerald-300 rounded font-normal">自定义</span>' : '';
         
         html += `
             <div class="relative group ${isCurrentSource ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-105 transition-transform'}" 
@@ -1695,8 +1773,8 @@ async function showSwitchResourceModal() {
                     </div>
                 </div>
                 <div class="mt-2">
-                    <div class="text-xs font-medium text-gray-200 truncate">${result.vod_name}</div>
-                    <div class="text-[10px] text-gray-400 truncate">${sourceName}</div>
+                    <div class="text-xs font-medium text-gray-200 truncate" title="${result.vod_name}">${result.vod_name}</div>
+                    <div class="text-[10px] text-gray-400 truncate flex items-center">${sourceName}${customBadge}</div>
                     <div class="text-[10px] text-gray-500 mt-1">
                         ${speedResult.episodes ? `${speedResult.episodes}集` : ''}
                     </div>
