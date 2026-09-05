@@ -1729,14 +1729,16 @@ function loadBuiltinTvboxSites(presetType = 'default') {
             ];
         } else {
             const rawMap = window.BUILTIN_CUSTOMER_SITES || {};
-            sites = Object.keys(rawMap).map((k) => ({
-                key: k,
-                name: rawMap[k].name,
-                api: rawMap[k].api,
-                type: rawMap[k].type || 1,
-                compatible: true,
-                reason: rawMap[k].category === 'music' ? '精选音乐听书源' : (rawMap[k].category === 'short' ? '精选短剧源' : '精选影视源')
-            }));
+            sites = Object.keys(rawMap)
+                .filter(k => !rawMap[k].adult && k !== 'testSource')
+                .map((k) => ({
+                    key: k,
+                    name: rawMap[k].name,
+                    api: rawMap[k].api,
+                    type: rawMap[k].type || 1,
+                    compatible: true,
+                    reason: rawMap[k].category === 'music' ? '精选音乐听书源' : (rawMap[k].category === 'short' ? '精选短剧源' : '精选影视源')
+                }));
         }
 
         const result = {

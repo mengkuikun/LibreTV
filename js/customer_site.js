@@ -150,6 +150,15 @@ const CUSTOMER_SITES = {
         type: 1,
         category: 'music',
         tag: '音乐'
+    },
+    // 成人测试源 (原站预设，关掉黄色内容过滤后展示)
+    testSource: {
+        api: 'https://www.example.com/api.php/provide/vod',
+        name: '空内容测试源',
+        type: 1,
+        category: 'adult',
+        adult: true,
+        tag: '测试'
     }
 };
 
