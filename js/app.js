@@ -25,12 +25,18 @@ document.addEventListener('DOMContentLoaded', function () {
         selectedAPIs = ["guangsu", "360zy", "wujin", "bfzy"].filter(k => API_SITES[k]);
         localStorage.setItem('selectedAPIs', JSON.stringify(selectedAPIs));
 
-        // 默认选中过滤开关
-        localStorage.setItem('yellowFilterEnabled', 'true');
-        localStorage.setItem(PLAYER_CONFIG.adFilteringStorage, 'true');
+        // 默认选中过滤开关 (仅首次无记录时写入)
+        if (localStorage.getItem('yellowFilterEnabled') === null) {
+            localStorage.setItem('yellowFilterEnabled', 'true');
+        }
+        if (localStorage.getItem(PLAYER_CONFIG.adFilteringStorage) === null) {
+            localStorage.setItem(PLAYER_CONFIG.adFilteringStorage, 'true');
+        }
 
         // 默认启用豆瓣功能
-        localStorage.setItem('doubanEnabled', 'true');
+        if (localStorage.getItem('doubanEnabled') === null) {
+            localStorage.setItem('doubanEnabled', 'true');
+        }
 
         // 标记已初始化默认值
         localStorage.setItem('hasInitializedDefaults', 'true');
@@ -135,52 +141,63 @@ function initAPICheckboxes() {
     checkAdultAPIsSelected();
 }
 
-// 添加成人API列表 (100% 保持原站样式与 SVG 图标)
+// 添加成人API列表 (100% 保持原站样式与 SVG 图标，预渲染常驻并受控显隐)
 function addAdultAPI() {
-    if (!HIDE_BUILTIN_ADULT_APIS && (localStorage.getItem('yellowFilterEnabled') === 'false')) {
-        const container = document.getElementById('apiCheckboxes');
-        if (!container) return;
+    if (HIDE_BUILTIN_ADULT_APIS) return;
 
-        const adultKeys = Object.keys(API_SITES).filter(k => API_SITES[k].adult);
-        if (adultKeys.length === 0) return;
+    const container = document.getElementById('apiCheckboxes');
+    if (!container) return;
 
-        const adultdiv = document.createElement('div');
-        adultdiv.id = 'adultdiv';
-        adultdiv.className = 'grid grid-cols-2 gap-2 mb-2';
+    // 检查是否已存在 adultdiv
+    let adultdiv = document.getElementById('adultdiv');
+    const isFilterDisabled = localStorage.getItem('yellowFilterEnabled') === 'false';
 
-        const adultTitle = document.createElement('div');
-        adultTitle.className = 'api-group-title adult';
-        adultTitle.innerHTML = `黄色资源采集站 <span class="adult-warning">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-        </span>`;
-        adultdiv.appendChild(adultTitle);
-
-        adultKeys.forEach(apiKey => {
-            const api = API_SITES[apiKey];
-            const checked = selectedAPIs.includes(apiKey);
-
-            const checkbox = document.createElement('div');
-            checkbox.className = 'flex items-center';
-            checkbox.innerHTML = `
-                <input type="checkbox" id="api_${apiKey}" 
-                       class="form-checkbox h-3 w-3 text-blue-600 bg-[#222] border border-[#333] api-adult" 
-                       ${checked ? 'checked' : ''} 
-                       data-api="${apiKey}"
-                       data-category="adult">
-                <label for="api_${apiKey}" class="ml-1 text-xs text-pink-400 truncate cursor-pointer" title="${api.name}">${api.name}</label>
-            `;
-            adultdiv.appendChild(checkbox);
-
-            checkbox.querySelector('input').addEventListener('change', function () {
-                updateSelectedAPIs();
-                checkAdultAPIsSelected();
-            });
-        });
-
-        container.appendChild(adultdiv);
+    if (adultdiv) {
+        adultdiv.style.display = isFilterDisabled ? '' : 'none';
+        return;
     }
+
+    const adultKeys = Object.keys(API_SITES).filter(k => API_SITES[k].adult);
+    if (adultKeys.length === 0) return;
+
+    adultdiv = document.createElement('div');
+    adultdiv.id = 'adultdiv';
+    adultdiv.className = 'grid grid-cols-2 gap-2 mb-2';
+    // 初始受控显隐：关闭过滤时显示，开启过滤时隐藏
+    adultdiv.style.display = isFilterDisabled ? '' : 'none';
+
+    const adultTitle = document.createElement('div');
+    adultTitle.className = 'api-group-title adult';
+    adultTitle.innerHTML = `黄色资源采集站 <span class="adult-warning">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+    </span>`;
+    adultdiv.appendChild(adultTitle);
+
+    adultKeys.forEach(apiKey => {
+        const api = API_SITES[apiKey];
+        const checked = selectedAPIs.includes(apiKey);
+
+        const checkbox = document.createElement('div');
+        checkbox.className = 'flex items-center';
+        checkbox.innerHTML = `
+            <input type="checkbox" id="api_${apiKey}" 
+                   class="form-checkbox h-3 w-3 text-blue-600 bg-[#222] border border-[#333] api-adult" 
+                   ${checked ? 'checked' : ''} 
+                   data-api="${apiKey}"
+                   data-category="adult">
+            <label for="api_${apiKey}" class="ml-1 text-xs text-pink-400 truncate cursor-pointer" title="${api.name}">${api.name}</label>
+        `;
+        adultdiv.appendChild(checkbox);
+
+        checkbox.querySelector('input').addEventListener('change', function () {
+            updateSelectedAPIs();
+            checkAdultAPIsSelected();
+        });
+    });
+
+    container.appendChild(adultdiv);
 }
 
 // 检查是否有成人API被选中
